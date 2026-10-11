@@ -61,7 +61,7 @@ def check_password(target_password="900812"):
 
 
 # -------------------------------------------------------------------
-# 📡 數據解析：解析 獨贏 / 讓分 / 大小分 所有盤口
+# 📡 數據解析：全盤口與白話說明
 # -------------------------------------------------------------------
 @st.cache_data(ttl=600)
 def fetch_all_markets(api_key, sport_key):
@@ -98,7 +98,7 @@ def fetch_all_markets(api_key, sport_key):
             for market in bookmaker.get("markets", []):
                 m_key = market["key"]
 
-                # 1. 獨贏盤 (H2H)
+                # 1. 獨贏盤
                 if m_key == "h2h":
                     for outcome in market["outcomes"]:
                         team_cn = TEAM_NAME_MAP.get(
@@ -130,7 +130,7 @@ def fetch_all_markets(api_key, sport_key):
                             }
                         )
 
-                # 2. 讓分盤 (Spreads)
+                # 2. 讓分盤
                 elif m_key == "spreads":
                     for outcome in market["outcomes"]:
                         team_cn = TEAM_NAME_MAP.get(
@@ -160,7 +160,7 @@ def fetch_all_markets(api_key, sport_key):
                             }
                         )
 
-                # 3. 大小分 (Totals)
+                # 3. 大小分
                 elif m_key == "totals":
                     for outcome in market["outcomes"]:
                         name_cn = (
@@ -206,7 +206,7 @@ if check_password("900812"):
 
     api_key = "c0d0209bb272cde2bb4464ce0a93ea56"
 
-    # 側邊欄控制項
+    # 1. 側邊欄控制項（確保變數優先宣告，解決 NameError）
     st.sidebar.header("⚙️ 選擇賽事與資金")
     sport_choice = st.sidebar.selectbox(
         "選擇運動賽事",
@@ -230,7 +230,7 @@ if check_password("900812"):
         st.cache_data.clear()
         st.rerun()
 
-    # 載入所有盤口選項
+    # 2. 載入盤口資料
     with st.spinner("📡 正在抓取全盤口賠率數據中..."):
         df_all, error_msg = fetch_all_markets(api_key, selected_sport_key)
 
@@ -241,16 +241,12 @@ if check_password("900812"):
             ["📋 自由勾選盤口 (全玩法總覽)", "🎯 AI 智能精選推薦單"]
         )
 
-        # ---------------------------------------------------------------
-        # TAB 1: 自由勾選全盤口
-        # ---------------------------------------------------------------
         with tab1:
             st.subheader(f"🌐 {sport_choice} 全賽事盤口清單")
             st.info(
                 "💡 **使用說明**：請在下方列表中直接勾選你想要串關的選項（可跨場次、跨玩法組合），下方會自動為你產出擬真彩券！"
             )
 
-            # 按賽事分組顯示
             matches = df_all["match"].unique()
             selected_items = []
 
@@ -302,9 +298,7 @@ if check_password("900812"):
                             if st.checkbox(label, key=f"chk_{idx}"):
                                 selected_items.append(row)
 
-            # -----------------------------------------------------------
-            # 擬真彩券購物車結算 (修復 unsafe_allow_html 參數)
-            # -----------------------------------------------------------
+            # 擬真彩券購物車結算
             st.markdown("---")
             st.subheader("🧾 你的自選串關投注單")
 
@@ -340,15 +334,11 @@ if check_password("900812"):
                 """,
                     unsafe_allow_html=True,
                 )
-
             else:
                 st.warning(
                     "💡 目前尚未勾選任何選項，請在上方賽事列表中勾選 1 個以上的投注項目！"
                 )
 
-        # ---------------------------------------------------------------
-        # TAB 2: AI 自動精選推薦單
-        # ---------------------------------------------------------------
         with tab2:
             st.subheader("🔥 AI 自動篩選高 EV 最佳買法推薦")
 
