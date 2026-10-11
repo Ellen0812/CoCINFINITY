@@ -244,7 +244,7 @@ if check_password("900812"):
         with tab1:
             st.subheader(f"🌐 {sport_choice} 全賽事盤口清單")
             st.info(
-                "💡 **使用說明**：請在下方列表中直接勾選你想要串關的選項（可跨場次、跨玩法組合），下方會自動為你產出擬真彩券！"
+                "💡 **說明**：請在下方列表中勾選你想串關的選項，下方會自動為你產出彩券試算！"
             )
 
             matches = df_all["match"].unique()
