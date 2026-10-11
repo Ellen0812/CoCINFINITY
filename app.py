@@ -206,8 +206,8 @@ if check_password("900812"):
 
     api_key = "c0d0209bb272cde2bb4464ce0a93ea56"
 
-    # 1. 側邊欄控制項（正確宣告 budget 變數）
-    st.sidebar.header("⚙️ 選擇賽事與資金")
+    # 1. 側邊欄控制項（包含玩法選擇欄）
+    st.sidebar.header("⚙️ 賽事與玩法選擇")
     sport_choice = st.sidebar.selectbox(
         "選擇運動賽事",
         [
@@ -221,6 +221,12 @@ if check_password("900812"):
         "籃球 - 美國職業籃球 (NBA)": "basketball_nba",
     }
     selected_sport_key = sport_key_map[sport_choice]
+
+    market_types_selected = st.sidebar.multiselect(
+        "選擇顯示下注玩法",
+        ["不讓分 (獨贏)", "讓分盤", "大小分"],
+        default=["不讓分 (獨贏)", "讓分盤", "大小分"],
+    )
 
     budget = st.sidebar.number_input(
         "預計單張投注預算 ($)", min_value=10, value=100, step=10
@@ -250,97 +256,77 @@ if check_password("900812"):
                 "💡 **說明**：請在下方列表中勾選你想串關的選項（可跨場次、跨玩法），下方會自動為你產出彩券試算！"
             )
 
-            matches = df_all["match"].unique()
-            selected_items = []
-
-            for m in matches:
-                with st.expander(f"⚽/🏀 賽事：{m}", expanded=True):
-                    sub_df = df_all[df_all["match"] == m]
-
-                    c1, c2, c3 = st.columns(3)
-
-                    with c1:
-                        st.markdown("**【獨贏 / 不讓分】**")
-                        for idx, row in sub_df[
-                            sub_df["type"] == "不讓分 (獨贏)"
-                        ].iterrows():
-                            ev_color = "🟢" if row["ev"] > 0 else "⚪"
-                            label = (
-                                f"{row['pick']} | 賠率"
-                                f" {row['odds']} ({ev_color} EV:"
-                                f" {row['ev']})"
-                            )
-                            if st.checkbox(label, key=f"chk_{idx}"):
-                                selected_items.append(row)
-
-                    with c2:
-                        st.markdown("**【讓分盤口】**")
-                        for idx, row in sub_df[
-                            sub_df["type"] == "讓分盤"
-                        ].iterrows():
-                            ev_color = "🟢" if row["ev"] > 0 else "⚪"
-                            label = (
-                                f"{row['pick']} | 賠率"
-                                f" {row['odds']} ({ev_color} EV:"
-                                f" {row['ev']})"
-                            )
-                            if st.checkbox(label, key=f"chk_{idx}"):
-                                selected_items.append(row)
-
-                    with c3:
-                        st.markdown("**【大小分盤口】**")
-                        for idx, row in sub_df[
-                            sub_df["type"] == "大小分"
-                        ].iterrows():
-                            ev_color = "🟢" if row["ev"] > 0 else "⚪"
-                            label = (
-                                f"{row['pick']} | 賠率"
-                                f" {row['odds']} ({ev_color} EV:"
-                                f" {row['ev']})"
-                            )
-                            if st.checkbox(label, key=f"chk_{idx}"):
-                                selected_items.append(row)
-
-            # 擬真彩券試算
-            st.markdown("---")
-            st.subheader("🧾 你的自選串關投注單")
-
-            if len(selected_items) >= 1:
-                total_odds = 1.0
-                total_prob = 1.0
-
-                st.write(f"已勾選 **{len(selected_items)}** 個投注選項：")
-
-                for item in selected_items:
-                    total_odds *= item["odds"]
-                    total_prob *= item["win_prob"]
-                    st.success(
-                        f"📌 **{item['match']}** ➔ **{item['pick']}**"
-                        f" （{item['detail']}）"
-                    )
-
-                total_odds = round(total_odds, 2)
-                payout = round(budget * total_odds, 2)
-                combo_ev = round((total_prob * total_odds) - 1, 3)
-
-                st.markdown(
-                    f"""
-                <div style="background-color:#1e293b; padding:20px; border-radius:10px; border:2px solid #3b82f6;">
-                    <h3 style="color:#60a5fa; margin-top:0;">🎟️ 串關彩券試算結果 ({len(selected_items)} 串 1)</h3>
-                    <p style="font-size:18px;">💵 <b>投注預算</b>：$ {budget} 元</p>
-                    <p style="font-size:18px;">⚡ <b>組合總賠率</b>：<span style="color:#f59e0b; font-size:22px; font-weight:bold;">{total_odds} 倍</span></p>
-                    <p style="font-size:18px;">🎯 <b>預估全過過關率</b>：{total_prob:.1%}</p>
-                    <p style="font-size:18px;">📈 <b>整體期望值 (EV)</b>：{combo_ev}</p>
-                    <hr>
-                    <h2 style="color:#10b981; margin-bottom:0;">💰 預計最高派彩金額：$ {payout} 元</h2>
-                </div>
-                """,
-                    unsafe_allow_html=True,
-                )
+            if not market_types_selected:
+                st.warning("⚠️ 請在左側選單勾選至少一種玩法（例如：不讓分、讓分盤或大小分）！")
             else:
-                st.warning(
-                    "💡 目前尚未勾選任何選項，請在上方賽事列表中勾選 1 個以上的投注項目！"
-                )
+                matches = df_all["match"].unique()
+                selected_items = []
+
+                for m in matches:
+                    with st.expander(f"⚽/🏀 賽事：{m}", expanded=True):
+                        sub_df = df_all[df_all["match"] == m]
+
+                        num_cols = len(market_types_selected)
+                        cols = st.columns(num_cols)
+
+                        for col, m_type in zip(cols, market_types_selected):
+                            with col:
+                                st.markdown(f"**【{m_type}】**")
+                                type_df = sub_df[sub_df["type"] == m_type]
+
+                                if type_df.empty:
+                                    st.caption("無可提供盤口")
+                                else:
+                                    for idx, row in type_df.iterrows():
+                                        ev_color = "🟢" if row["ev"] > 0 else "⚪"
+                                        label = (
+                                            f"{row['pick']} | 賠率"
+                                            f" {row['odds']} ({ev_color} EV:"
+                                            f" {row['ev']})"
+                                        )
+                                        if st.checkbox(label, key=f"chk_{idx}"):
+                                            selected_items.append(row)
+
+                # 擬真彩券試算
+                st.markdown("---")
+                st.subheader("🧾 你的自選串關投注單")
+
+                if len(selected_items) >= 1:
+                    total_odds = 1.0
+                    total_prob = 1.0
+
+                    st.write(f"已勾選 **{len(selected_items)}** 個投注選項：")
+
+                    for item in selected_items:
+                        total_odds *= item["odds"]
+                        total_prob *= item["win_prob"]
+                        st.success(
+                            f"📌 **{item['match']}** ➔ **{item['pick']}**"
+                            f" （{item['detail']}）"
+                        )
+
+                    total_odds = round(total_odds, 2)
+                    payout = round(budget * total_odds, 2)
+                    combo_ev = round((total_prob * total_odds) - 1, 3)
+
+                    st.markdown(
+                        f"""
+                    <div style="background-color:#1e293b; padding:20px; border-radius:10px; border:2px solid #3b82f6;">
+                        <h3 style="color:#60a5fa; margin-top:0;">🎟️ 串關彩券試算結果 ({len(selected_items)} 串 1)</h3>
+                        <p style="font-size:18px;">💵 <b>投注預算</b>：$ {budget} 元</p>
+                        <p style="font-size:18px;">⚡ <b>組合總賠率</b>：<span style="color:#f59e0b; font-size:22px; font-weight:bold;">{total_odds} 倍</span></p>
+                        <p style="font-size:18px;">🎯 <b>預估全過過關率</b>：{total_prob:.1%}</p>
+                        <p style="font-size:18px;">📈 <b>整體期望值 (EV)</b>：{combo_ev}</p>
+                        <hr>
+                        <h2 style="color:#10b981; margin-bottom:0;">💰 預計最高派彩金額：$ {payout} 元</h2>
+                    </div>
+                    """,
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.warning(
+                        "💡 目前尚未勾選任何選項，請在上方賽事列表中勾選 1 個以上的投注項目！"
+                    )
 
         # ---------------------------------------------------------------
         # TAB 2: AI 智能精選推薦單
