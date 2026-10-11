@@ -145,7 +145,7 @@ def fetch_all_markets(api_key, sport_key):
                         )
 
                         odds = outcome["price"]
-                        p_win = 0.50  # 基礎讓分概算機率
+                        p_win = 0.50
                         ev = round((p_win * odds) - 1, 3)
 
                         all_options.append(
@@ -242,7 +242,7 @@ if check_password("900812"):
         )
 
         # ---------------------------------------------------------------
-        # TAB 1: 自由勾選全盤口 (解決「看不懂買什麼」與「自己組單」的需求)
+        # TAB 1: 自由勾選全盤口
         # ---------------------------------------------------------------
         with tab1:
             st.subheader(f"🌐 {sport_choice} 全賽事盤口清單")
@@ -258,13 +258,12 @@ if check_password("900812"):
                 with st.expander(f"⚽/🏀 賽事：{m}", expanded=True):
                     sub_df = df_all[df_all["match"] == m]
 
-                    # 用三欄排版：不讓分 / 讓分 / 大小分
                     c1, c2, c3 = st.columns(3)
 
                     with c1:
                         st.markdown("**【獨贏 / 不讓分】**")
                         for idx, row in sub_df[
-                            sub_df["type"] == "不讓分 (独赢)"
+                            sub_df["type"] == "不讓分 (獨贏)"
                         ].iterrows():
                             ev_color = "🟢" if row["ev"] > 0 else "⚪"
                             label = (
@@ -304,7 +303,7 @@ if check_password("900812"):
                                 selected_items.append(row)
 
             # -----------------------------------------------------------
-            # 擬真彩券購物車結算
+            # 擬真彩券購物車結算 (修復 unsafe_allow_html 參數)
             # -----------------------------------------------------------
             st.markdown("---")
             st.subheader("🧾 你的自選串關投注單")
@@ -315,7 +314,6 @@ if check_password("900812"):
 
                 st.write(f"已勾選 **{len(selected_items)}** 個投注選項：")
 
-                # 顯示選中的每一腳 (Legs)
                 for item in selected_items:
                     total_odds *= item["odds"]
                     total_prob *= item["win_prob"]
@@ -340,7 +338,7 @@ if check_password("900812"):
                     <h2 style="color:#10b981; margin-bottom:0;">💰 預計最高派彩金額：$ {payout} 元</h2>
                 </div>
                 """,
-                    unsafe_allow_content=True,
+                    unsafe_allow_html=True,
                 )
 
             else:
@@ -349,18 +347,16 @@ if check_password("900812"):
                 )
 
         # ---------------------------------------------------------------
-        # TAB 2: AI 自動精選推薦單 (直白明確版)
+        # TAB 2: AI 自動精選推薦單
         # ---------------------------------------------------------------
         with tab2:
             st.subheader("🔥 AI 自動篩選高 EV 最佳買法推薦")
 
-            # 篩選正 EV 項目
             positive_ev_df = df_all[df_all["ev"] > 0]
 
             if not positive_ev_df.empty:
                 st.write("系統自動為你篩選出**期望值 > 0** 的最優質投注組合：")
 
-                # 自動排版為卡片
                 for match_name in positive_ev_df["match"].unique():
                     match_df = positive_ev_df[
                         positive_ev_df["match"] == match_name
