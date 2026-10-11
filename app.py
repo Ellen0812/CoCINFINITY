@@ -206,7 +206,7 @@ if check_password("900812"):
 
     api_key = "c0d0209bb272cde2bb4464ce0a93ea56"
 
-    # 1. 側邊欄控制項（優先宣告 budget 變數）
+    # 1. 側邊欄控制項（正确賦值 budget 變數）
     st.sidebar.header("⚙️ 選擇賽事與資金")
     sport_choice = st.sidebar.selectbox(
         "選擇運動賽事",
