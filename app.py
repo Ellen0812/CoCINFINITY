@@ -98,7 +98,7 @@ def fetch_all_markets(api_key, sport_key):
             for market in bookmaker.get("markets", []):
                 m_key = market["key"]
 
-                # 1. 獨贏盤
+                # 1. 獨贏盤 (H2H)
                 if m_key == "h2h":
                     for outcome in market["outcomes"]:
                         team_cn = TEAM_NAME_MAP.get(
@@ -130,7 +130,7 @@ def fetch_all_markets(api_key, sport_key):
                             }
                         )
 
-                # 2. 讓分盤
+                # 2. 讓分盤 (Spreads)
                 elif m_key == "spreads":
                     for outcome in market["outcomes"]:
                         team_cn = TEAM_NAME_MAP.get(
@@ -160,7 +160,7 @@ def fetch_all_markets(api_key, sport_key):
                             }
                         )
 
-                # 3. 大小分
+                # 3. 大小分 (Totals)
                 elif m_key == "totals":
                     for outcome in market["outcomes"]:
                         name_cn = (
@@ -241,10 +241,13 @@ if check_password("900812"):
             ["📋 自由勾選盤口 (全玩法總覽)", "🎯 AI 智能精選推薦單"]
         )
 
+        # ---------------------------------------------------------------
+        # TAB 1: 自由勾選全盤口
+        # ---------------------------------------------------------------
         with tab1:
             st.subheader(f"🌐 {sport_choice} 全賽事盤口清單")
             st.info(
-                "💡 **說明**：請在下方列表中勾選你想串關的選項，下方會自動為你產出彩券試算！"
+                "💡 **說明**：請在下方列表中勾選你想串關的選項（可跨場次、跨玩法），下方會自動為你產出彩券試算！"
             )
 
             matches = df_all["match"].unique()
@@ -339,6 +342,9 @@ if check_password("900812"):
                     "💡 目前尚未勾選任何選項，請在上方賽事列表中勾選 1 個以上的投注項目！"
                 )
 
+        # ---------------------------------------------------------------
+        # TAB 2: AI 智能精選推薦單
+        # ---------------------------------------------------------------
         with tab2:
             st.subheader("🔥 AI 自動篩選高 EV 最佳買法推薦")
 
