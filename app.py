@@ -1,4 +1,7 @@
+%%writefile app.py
+import datetime
 import itertools
+import sqlite3
 import numpy as np
 import pandas as pd
 import requests
@@ -28,7 +31,7 @@ TEAM_NAME_MAP = {
     "Golden State Warriors": "金州勇士",
     "Boston Celtics": "波士頓塞爾特人",
     "Miami Heat": "邁阿密熱火",
-    "Brooklyn Nets": "布魯克林籃網",
+    "Brooklyn Nets": "布魯克林網",
     "Phoenix Suns": "菲尼克斯太陽",
 }
 
@@ -59,10 +62,10 @@ def check_password(target_password="900812"):
 
 
 # -------------------------------------------------------------------
-# 📡 數據抓取與模型核心函數
+# 📡 數據解析：解析 獨贏 / 讓分 / 大小分 所有盤口
 # -------------------------------------------------------------------
 @st.cache_data(ttl=600)
-def fetch_and_analyze_data(api_key, sport_key, parlay_legs, min_odds_threshold):
+def fetch_all_markets(api_key, sport_key):
     if not api_key:
         return None, "請設定 API Key！"
 
@@ -72,8 +75,7 @@ def fetch_and_analyze_data(api_key, sport_key, parlay_legs, min_odds_threshold):
         if response.status_code != 200:
             return (
                 None,
-                f"API 連線失敗 (代碼 {response.status_code}):"
-                f" {response.text}",
+                f"API 連線失敗 (代碼 {response.status_code}): {response.text}",
             )
         data = response.json()
     except Exception as e:
@@ -82,100 +84,111 @@ def fetch_and_analyze_data(api_key, sport_key, parlay_legs, min_odds_threshold):
     if not data:
         return None, "目前沒有該賽事的即時盤口資料。"
 
-    analysis_list = []
-    candidates_for_parlay = []
+    all_options = []
 
     for match in data:
         home_en = match.get("home_team", "")
         away_en = match.get("away_team", "")
         home_cn = TEAM_NAME_MAP.get(home_en, home_en)
         away_cn = TEAM_NAME_MAP.get(away_en, away_en)
+        match_title = f"{home_cn} (主) vs {away_cn} (客)"
 
         if match.get("bookmakers"):
             bookmaker = match["bookmakers"][0]
 
-            h2h_market = next(
-                (m for m in bookmaker["markets"] if m["key"] == "h2h"), None
-            )
-            home_odds, away_odds, draw_odds = None, None, None
-            if h2h_market:
-                for outcome in h2h_market["outcomes"]:
-                    if outcome["name"] == home_en:
-                        home_odds = outcome["price"]
-                    elif outcome["name"] == away_en:
-                        away_odds = outcome["price"]
-                    elif outcome["name"] == "Draw":
-                        draw_odds = outcome["price"]
+            for market in bookmaker.get("markets", []):
+                m_key = market["key"]
 
-            if "soccer" in sport_key:
-                p_home, p_away = 0.48, 0.32
-            else:
-                p_home, p_away = 0.58, 0.42
+                # 1. 獨贏盤 (H2H)
+                if m_key == "h2h":
+                    for outcome in market["outcomes"]:
+                        team_cn = TEAM_NAME_MAP.get(
+                            outcome["name"], outcome["name"]
+                        )
+                        if outcome["name"] == "Draw":
+                            pick_name = "和局"
+                            p_win = 0.25
+                        else:
+                            is_home = outcome["name"] == home_en
+                            pick_name = (
+                                f"{team_cn} 不讓分勝"
+                                f" ({'主場' if is_home else '客場'})"
+                            )
+                            p_win = 0.48 if is_home else 0.35
 
-            ev_home = round((p_home * home_odds) - 1, 3) if home_odds else -1
-            ev_away = round((p_away * away_odds) - 1, 3) if away_odds else -1
+                        odds = outcome["price"]
+                        ev = round((p_win * odds) - 1, 3)
 
-            rec_option = "觀望"
-            if ev_home > 0 and home_odds and home_odds >= min_odds_threshold:
-                rec_option = f"主勝 ({home_cn})"
-                candidates_for_parlay.append(
-                    {
-                        "match": f"{home_cn} vs {away_cn}",
-                        "pick": f"{home_cn} 主勝",
-                        "odds": home_odds,
-                        "win_prob": p_home,
-                    }
-                )
-            elif ev_away > 0 and away_odds and away_odds >= min_odds_threshold:
-                rec_option = f"客勝 ({away_cn})"
-                candidates_for_parlay.append(
-                    {
-                        "match": f"{home_cn} vs {away_cn}",
-                        "pick": f"{away_cn} 客勝",
-                        "odds": away_odds,
-                        "win_prob": p_away,
-                    }
-                )
+                        all_options.append(
+                            {
+                                "match": match_title,
+                                "type": "不讓分 (獨贏)",
+                                "pick": pick_name,
+                                "detail": f"賠率 {odds}",
+                                "odds": odds,
+                                "win_prob": p_win,
+                                "ev": ev,
+                            }
+                        )
 
-            analysis_list.append(
-                {
-                    "對陣": f"{home_cn} vs {away_cn}",
-                    "主勝賠率": home_odds,
-                    "和局賠率": draw_odds if draw_odds else "無",
-                    "客勝賠率": away_odds,
-                    "主勝 EV": ev_home,
-                    "客勝 EV": ev_away,
-                    "模型推薦": rec_option,
-                }
-            )
+                # 2. 讓分盤 (Spreads)
+                elif m_key == "spreads":
+                    for outcome in market["outcomes"]:
+                        team_cn = TEAM_NAME_MAP.get(
+                            outcome["name"], outcome["name"]
+                        )
+                        point = outcome.get("point", 0)
+                        point_str = f"+{point}" if point > 0 else str(point)
+                        is_home = outcome["name"] == home_en
+                        pick_name = (
+                            f"{team_cn} 讓分 ({point_str})"
+                            f" ({'主場' if is_home else '客場'})"
+                        )
 
-    df_analysis = pd.DataFrame(analysis_list)
+                        odds = outcome["price"]
+                        p_win = 0.50  # 基礎讓分概算機率
+                        ev = round((p_win * odds) - 1, 3)
 
-    parlays = []
-    if len(candidates_for_parlay) >= parlay_legs:
-        for combo in itertools.combinations(
-            candidates_for_parlay, parlay_legs
-        ):
-            t_odds = 1.0
-            t_prob = 1.0
-            combo_picks = []
-            for item in combo:
-                t_odds *= item["odds"]
-                t_prob *= item["win_prob"]
-                combo_picks.append(item["pick"])
+                        all_options.append(
+                            {
+                                "match": match_title,
+                                "type": "讓分盤",
+                                "pick": pick_name,
+                                "detail": f"盤口 ({point_str}) @ 賠率 {odds}",
+                                "odds": odds,
+                                "win_prob": p_win,
+                                "ev": ev,
+                            }
+                        )
 
-            t_odds = round(t_odds, 2)
-            parlays.append(
-                {
-                    "組合": " + ".join(combo_picks),
-                    "總賠率": t_odds,
-                    "預估全過機率": f"{t_prob:.1%}",
-                    "組合 EV": round((t_prob * t_odds) - 1, 3),
-                }
-            )
+                # 3. 大小分 (Totals)
+                elif m_key == "totals":
+                    for outcome in market["outcomes"]:
+                        name_cn = (
+                            "大分"
+                            if outcome["name"].lower() == "over"
+                            else "小分"
+                        )
+                        point = outcome.get("point", 0)
+                        pick_name = f"全場大小分：{name_cn} ({point} 球/分)"
 
-    df_parlay = pd.DataFrame(parlays) if parlays else None
-    return (df_analysis, df_parlay), None
+                        odds = outcome["price"]
+                        p_win = 0.50
+                        ev = round((p_win * odds) - 1, 3)
+
+                        all_options.append(
+                            {
+                                "match": match_title,
+                                "type": "大小分",
+                                "pick": pick_name,
+                                "detail": f"{point} {name_cn} @ 賠率 {odds}",
+                                "odds": odds,
+                                "win_prob": p_win,
+                                "ev": ev,
+                            }
+                        )
+
+    return pd.DataFrame(all_options), None
 
 
 # -------------------------------------------------------------------
@@ -187,15 +200,15 @@ if check_password("900812"):
         st.session_state["password_correct"] = False
         st.rerun()
 
-    st.title("⚡ ODD-HUNTER ｜ 賠率獵人 AI x 實時數據分析")
+    st.title("⚡ ODD-HUNTER ｜ 賠率獵人 AI x 實體串關決策中心")
     st.caption(
-        "實時對接 The Odds API ｜ 多運動賽事與盤口 ｜ 靈活自訂過關策略"
+        "全盤口動態選擇 ｜ 直白盤口細節標示 ｜ 擬真運彩串關投注單試算"
     )
 
     api_key = "c0d0209bb272cde2bb4464ce0a93ea56"
 
-    # 側邊欄控制項 (優先宣告控制變數)
-    st.sidebar.header("⚙️ 賽事與策略選單")
+    # 側邊欄控制項
+    st.sidebar.header("⚙️ 選擇賽事與資金")
     sport_choice = st.sidebar.selectbox(
         "選擇運動賽事",
         [
@@ -210,56 +223,163 @@ if check_password("900812"):
     }
     selected_sport_key = sport_key_map[sport_choice]
 
-    st.sidebar.subheader("🎯 串關策略設定")
-    parlay_legs = st.sidebar.slider(
-        "自訂過關關數 (串關數量)", min_value=2, max_value=4, value=2
-    )
-    min_odds_threshold = st.sidebar.number_input(
-        "最低賠率過濾門檻", min_value=1.1, max_value=3.0, value=1.3, step=0.1
-    )
     budget = st.sidebar.number_input(
-        "預計投注預算 ($)", min_value=10, value=100, step=10
+        "預計單張投注預算 ($)", min_value=10, value=100, step=10
     )
 
-    if st.sidebar.button("🔄 手動刷新實時盤口"):
+    if st.sidebar.button("🔄 手動刷新盤口數據"):
         st.cache_data.clear()
         st.rerun()
 
-    with st.spinner("📡 正在抓取最新實時賠率並計算期望值中..."):
-        data_tuple, error_msg = fetch_and_analyze_data(
-            api_key, selected_sport_key, parlay_legs, min_odds_threshold
-        )
+    # 載入所有盤口選項
+    with st.spinner("📡 正在抓取全盤口賠率數據中..."):
+        df_all, error_msg = fetch_all_markets(api_key, selected_sport_key)
 
     if error_msg:
         st.error(f"❌ 數據載入失敗：{error_msg}")
     else:
-        df_analysis, df_parlay = data_tuple
-
         tab1, tab2 = st.tabs(
-            ["📊 實時盤口與 EV 分析表", f"🎯 AI 推薦 {parlay_legs} 串 1 組合"]
+            ["📋 自由勾選盤口 (全玩法總覽)", "🎯 AI 智能精選推薦單"]
         )
 
+        # ---------------------------------------------------------------
+        # TAB 1: 自由勾選全盤口 (解決「看不懂買什麼」與「自己組單」的需求)
+        # ---------------------------------------------------------------
         with tab1:
-            st.subheader(f"🌐 {sport_choice} 賠率與 EV 演算")
-            if df_analysis is not None and not df_analysis.empty:
-                st.dataframe(df_analysis, use_container_width=True)
-            else:
-                st.info("目前無可供分析的賽事盤口數據。")
+            st.subheader(f"🌐 {sport_choice} 全賽事盤口清單")
+            st.info(
+                "💡 **使用說明**：請在下方列表中直接勾選你想要串關的選項（可跨場次、跨玩法組合），下方會自動為你產出擬真彩券！"
+            )
 
-        with tab2:
-            st.subheader(f"🔥 自動篩選：正 EV {parlay_legs} 串 1 過關單")
-            if df_parlay is not None and not df_parlay.empty:
-                for _, row in df_parlay.iterrows():
+            # 按賽事分組顯示
+            matches = df_all["match"].unique()
+            selected_items = []
+
+            for m in matches:
+                with st.expander(f"⚽/🏀 賽事：{m}", expanded=True):
+                    sub_df = df_all[df_all["match"] == m]
+
+                    # 用三欄排版：不讓分 / 讓分 / 大小分
+                    c1, c2, c3 = st.columns(3)
+
+                    with c1:
+                        st.markdown("**【獨贏 / 不讓分】**")
+                        for idx, row in sub_df[
+                            sub_df["type"] == "不讓分 (独赢)"
+                        ].iterrows():
+                            ev_color = "🟢" if row["ev"] > 0 else "⚪"
+                            label = (
+                                f"{row['pick']} | 賠率"
+                                f" {row['odds']} ({ev_color} EV:"
+                                f" {row['ev']})"
+                            )
+                            if st.checkbox(label, key=f"chk_{idx}"):
+                                selected_items.append(row)
+
+                    with c2:
+                        st.markdown("**【讓分盤口】**")
+                        for idx, row in sub_df[
+                            sub_df["type"] == "讓分盤"
+                        ].iterrows():
+                            ev_color = "🟢" if row["ev"] > 0 else "⚪"
+                            label = (
+                                f"{row['pick']} | 賠率"
+                                f" {row['odds']} ({ev_color} EV:"
+                                f" {row['ev']})"
+                            )
+                            if st.checkbox(label, key=f"chk_{idx}"):
+                                selected_items.append(row)
+
+                    with c3:
+                        st.markdown("**【大小分盤口】**")
+                        for idx, row in sub_df[
+                            sub_df["type"] == "大小分"
+                        ].iterrows():
+                            ev_color = "🟢" if row["ev"] > 0 else "⚪"
+                            label = (
+                                f"{row['pick']} | 賠率"
+                                f" {row['odds']} ({ev_color} EV:"
+                                f" {row['ev']})"
+                            )
+                            if st.checkbox(label, key=f"chk_{idx}"):
+                                selected_items.append(row)
+
+            # -----------------------------------------------------------
+            # 擬真彩券購物車結算
+            # -----------------------------------------------------------
+            st.markdown("---")
+            st.subheader("🧾 你的自選串關投注單")
+
+            if len(selected_items) >= 1:
+                total_odds = 1.0
+                total_prob = 1.0
+
+                st.write(f"已勾選 **{len(selected_items)}** 個投注選項：")
+
+                # 顯示選中的每一腳 (Legs)
+                for item in selected_items:
+                    total_odds *= item["odds"]
+                    total_prob *= item["win_prob"]
                     st.success(
-                        f"### 🛡️ 推薦組合：{row['組合']}\n"
-                        f"* **總賠率**：`{row['總賠率']} 倍` | **預估勝率**："
-                        f" `{row['預估全過機率']}` | **EV**："
-                        f" `{row['組合 EV']}`\n"
-                        f"* **建議投注 $ {budget}** ➔ 預計最高派彩："
-                        f" **$ {round(budget * row['總賠率'], 2)}**"
+                        f"📌 **{item['match']}** ➔ **{item['pick']}**"
+                        f" （{item['detail']}）"
                     )
+
+                total_odds = round(total_odds, 2)
+                payout = round(budget * total_odds, 2)
+                combo_ev = round((total_prob * total_odds) - 1, 3)
+
+                st.markdown(
+                    f"""
+                <div style="background-color:#1e293b; padding:20px; border-radius:10px; border:2px solid #3b82f6;">
+                    <h3 style="color:#60a5fa; margin-top:0;">🎟️ 串關彩券試算結果 ({len(selected_items)} 串 1)</h3>
+                    <p style="font-size:18px;">💵 <b>投注預算</b>：$ {budget} 元</p>
+                    <p style="font-size:18px;">⚡ <b>組合總賠率</b>：<span style="color:#f59e0b; font-size:22px; font-weight:bold;">{total_odds} 倍</span></p>
+                    <p style="font-size:18px;">🎯 <b>預估全過過關率</b>：{total_prob:.1%}</p>
+                    <p style="font-size:18px;">📈 <b>整體期望值 (EV)</b>：{combo_ev}</p>
+                    <hr>
+                    <h2 style="color:#10b981; margin-bottom:0;">💰 預計最高派彩金額：$ {payout} 元</h2>
+                </div>
+                """,
+                    unsafe_allow_content=True,
+                )
+
             else:
                 st.warning(
-                    f"目前盤口中無符合賠率 ≥ {min_odds_threshold} 且 EV > 0 的"
-                    f" {parlay_legs} 串 1 組合條件。"
+                    "💡 目前尚未勾選任何選項，請在上方賽事列表中勾選 1 個以上的投注項目！"
                 )
+
+        # ---------------------------------------------------------------
+        # TAB 2: AI 自動精選推薦單 (直白明確版)
+        # ---------------------------------------------------------------
+        with tab2:
+            st.subheader("🔥 AI 自動篩選高 EV 最佳買法推薦")
+
+            # 篩選正 EV 項目
+            positive_ev_df = df_all[df_all["ev"] > 0]
+
+            if not positive_ev_df.empty:
+                st.write("系統自動為你篩選出**期望值 > 0** 的最優質投注組合：")
+
+                # 自動排版為卡片
+                for match_name in positive_ev_df["match"].unique():
+                    match_df = positive_ev_df[
+                        positive_ev_df["match"] == match_name
+                    ]
+
+                    with st.container():
+                        st.markdown(f"#### ⚽/🏀 {match_name}")
+                        for _, r in match_df.iterrows():
+                            st.info(
+                                f"👉 **建議買法**：【**{r['pick']}**】\n"
+                                f"* **盤口玩法**：{r['type']} |"
+                                f" **細節**：`{r['detail']}`\n"
+                                f"* **模型 EV (期望值)**：`+{r['ev']}` （具備長期投注價值）\n"
+                                f"* **實戰下注指引**：開啟運彩投注 App ➔ 找到"
+                                f" `{match_name}` ➔ 選擇"
+                                f" `{r['type']}` ➔ 勾選"
+                                f" **`{r['pick']}`**"
+                            )
+                        st.markdown("---")
+            else:
+                st.warning("目前實時盤口中暫無符合正期望值 (EV > 0) 的選項。")
