@@ -21,7 +21,8 @@ TEAM_NAME_MAP = {
     "Liverpool": "利物浦", "Manchester City": "曼城", "Aston Villa": "阿士東維拉",
     "Newcastle United": "紐卡素", "West Ham United": "韋斯咸", "Fulham": "富咸",
     "Hull City": "侯城", "Ipswich Town": "葉士域治", "Brighton": "白禮頓",
-    "Crystal Palace": "水晶宮",
+    "Crystal Palace": "水晶宮", "Brentford": "賓福特", "Everton": "愛華頓",
+    "Coventry City": "高雲地利",
     # 足球 - 西甲 (La Liga)
     "Real Madrid": "皇家馬德里", "Barcelona": "巴塞隆拿", "Atletico Madrid": "馬德里體育會",
     # 籃球 - NBA
@@ -111,10 +112,15 @@ def fetch_all_markets(api_key, sport_key):
 
         home_en = match.get("home_team", "")
         away_en = match.get("away_team", "")
-        home_cn = TEAM_NAME_MAP.get(home_en, home_en)
-        away_cn = TEAM_NAME_MAP.get(away_en, away_en)
+        
+        # 精確對照中英文名稱，避免名稱重複
+        home_cn = TEAM_NAME_MAP.get(home_en, "")
+        away_cn = TEAM_NAME_MAP.get(away_en, "")
+        
+        home_disp = f"{home_cn} {home_en}".strip()
+        away_disp = f"{away_cn} {away_en}".strip()
 
-        match_title = f"{home_cn} {home_en} (主) vs {away_cn} {away_en} (客)"
+        match_title = f"{home_disp} (主) vs {away_disp} (客)"
 
         if match.get("bookmakers"):
             bookmaker = match["bookmakers"][0]
@@ -250,9 +256,80 @@ if check_password("900812"):
                 matches = df_all["match"].unique()
                 selected_items = []
 
-                for m in matches:
+                for m_idx, m in enumerate(matches):
                     sub_df = df_all[df_all["match"] == m]
                     m_time = sub_df["match_time"].iloc[0]
 
                     with st.expander(f"🏆 賽事：{m} ｜ ⏰ 開賽時間：{m_time}", expanded=True):
-                        num_cols = len
+                        cols = st.columns(len(display_markets))
+
+                        for col_idx, m_type in enumerate(display_markets):
+                            with cols[col_idx]:
+                                st.markdown(f"**【{m_type}】**")
+                                type_df = sub_df[sub_df["type"] == m_type]
+
+                                if type_df.empty:
+                                    st.caption("無可提供盤口")
+                                else:
+                                    for idx, row in type_df.iterrows():
+                                        chk_key = f"chk_{m_idx}_{col_idx}_{idx}"
+                                        label = f"{row['pick']} | 賠率 {row['odds']} (勝率 {row['win_prob']:.0%})"
+                                        if st.checkbox(label, key=chk_key):
+                                            selected_items.append(row)
+
+                st.markdown("---")
+                st.subheader("🧾 你的自選組合與容錯拆單試算")
+
+                if len(selected_items) >= 2:
+                    st.write(f"已選擇 **{len(selected_items)}** 個選項：")
+                    for item in selected_items:
+                        st.success(
+                            f"📌 **{item['match']}** (`{item['match_time']}`)\n"
+                            f"➔ **{item['pick']}** （賠率 {item['odds']}）"
+                        )
+
+                    combos_2 = list(itertools.combinations(selected_items, 2))
+                    num_combos = len(combos_2)
+                    unit_budget = round(budget / num_combos, 2)
+
+                    st.markdown(f"""
+                    <div style="background-color:#0f172a; padding:20px; border-radius:10px; border:2px solid #10b981;">
+                        <h3 style="color:#10b981; margin-top:0;">🛡️ 高勝率「2 串 1 容錯組合」試算 (拆解為 {num_combos} 組)</h3>
+                        <p style="font-size:16px;">💵 <b>每組分配資金</b>：$ {unit_budget} 元 (總預算 $ {budget} 元)</p>
+                        <p style="font-size:16px;">🎯 <b>過關優勢</b>：只要猜中 2 場即開始派彩，錯 1 場也不會全輸！</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    st.write("▼ 拆解後的 2 串 1 子彩券組合細節：")
+                    for c_idx, combo in enumerate(combos_2, 1):
+                        c_odds = round(combo[0]['odds'] * combo[1]['odds'], 2)
+                        c_payout = round(unit_budget * c_odds, 2)
+                        st.info(
+                            f"**組合 #{c_idx}**：`{combo[0]['pick']}` + `{combo[1]['pick']}` "
+                            f"➔ **總賠率 {c_odds} 倍** | 命中可得：**$ {c_payout} 元**"
+                        )
+                else:
+                    st.warning("💡 請在上方至少勾選 2 個選項以進行容錯組合試算！")
+
+        with tab2:
+            st.subheader("🔥 AI 推薦：高勝率、低風險精選單")
+            st.caption("優先篩選勝率高、賠率適中 (1.30 ~ 1.75) 的穩健選項")
+
+            if df_all is not None and not df_all.empty:
+                stable_df = df_all[(df_all['odds'] >= 1.30) & (df_all['odds'] <= 1.75)]
+                
+                if not stable_df.empty:
+                    for match_name in stable_df['match'].unique():
+                        m_df = stable_df[stable_df['match'] == match_name]
+                        m_time = m_df["match_time"].iloc[0]
+
+                        st.markdown(f"#### 🏆 {match_name} ｜ ⏰ 時間：{m_time}")
+                        for _, r in m_df.iterrows():
+                            st.success(
+                                f"👉 **穩健推薦**：【**{r['pick']}**】\n"
+                                f"* **賠率**：`{r['odds']}` | **勝率估計**：`{r['win_prob']:.1%}`\n"
+                                f"* **開賽時間**：`{r['match_time']}`\n"
+                                f"* **策略建議**：適合做為「2 串 1 容錯單」的核心基底場次"
+                            )
+                else:
+                    st.info("今日賽事無 1.30 ~ 1.75 賠率區間的穩健選項。")
