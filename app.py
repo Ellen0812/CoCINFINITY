@@ -120,3 +120,24 @@ def fetch_all_markets(api_key, sport_key):
             bookmaker = match["bookmakers"][0]
 
             for market in bookmaker.get("markets", []):
+                m_key = market["key"]
+
+                if m_key == "h2h":
+                    for outcome in market["outcomes"]:
+                        team_en = outcome["name"]
+                        team_cn = TEAM_NAME_MAP.get(team_en, team_en)
+                        odds = outcome["price"]
+                        p_win = round(1 / odds, 4) if odds > 0 else 0.5
+                        
+                        if team_en == "Draw":
+                            pick_name = "全場和局 (Draw)"
+                        else:
+                            is_home = team_en == home_en
+                            pick_name = f"{team_cn} {team_en} 不讓分勝 ({'主' if is_home else '客'})"
+
+                        ev = round((p_win * odds) - 1, 3)
+
+                        all_options.append({
+                            "match": match_title,
+                            "match_time": time_str,
+                            "
