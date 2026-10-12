@@ -10,17 +10,25 @@ import streamlit as st
 # 頁面基本設定
 # -------------------------------------------------------------------
 st.set_page_config(
-    page_title="⚡ ODD-HUNTER ｜ 全球體育高過關率 AI x 容錯決策中心",
+    page_title="⚡ ODD-HUNTER ｜ 全球體育高過關率 AI x 組合防禦決策中心",
     layout="wide",
 )
 
 TEAM_NAME_MAP = {
+    # 足球 - 英超 (EPL)
     "Arsenal": "阿仙奴", "Leeds United": "列斯聯", "Chelsea": "車路士",
     "Bournemouth": "般尼茅夫", "Manchester United": "曼聯", "Tottenham Hotspur": "熱刺",
-    "Liverpool": "利物浦", "Manchester City": "曼城", "Real Madrid": "皇家馬德里",
-    "Barcelona": "巴塞隆拿", "Los Angeles Lakers": "洛杉磯湖人",
-    "Golden State Warriors": "金州勇士", "Boston Celtics": "波士頓塞爾特人",
+    "Liverpool": "利物浦", "Manchester City": "曼城", "Aston Villa": "阿士東維拉",
+    "Newcastle United": "紐卡素", "West Ham United": "韋斯咸",
+    # 足球 - 西甲 (La Liga)
+    "Real Madrid": "皇家馬德里", "Barcelona": "巴塞隆拿", "Atletico Madrid": "馬德里體育會",
+    # 籃球 - NBA
+    "Los Angeles Lakers": "洛杉磯湖人", "Golden State Warriors": "金州勇士",
+    "Boston Celtics": "波士頓塞爾特人", "Miami Heat": "邁阿密熱火",
+    "Brooklyn Nets": "布魯克林網", "Phoenix Suns": "菲尼克斯太陽",
+    # 棒球 - MLB
     "Los Angeles Dodgers": "洛杉磯道奇", "New York Yankees": "紐約洋基",
+    "Atlanta Braves": "亞特蘭大勇士", "Houston Astros": "休士頓太空人",
 }
 
 SPORT_CATEGORIES = {
@@ -45,6 +53,8 @@ SPORT_CATEGORIES = {
         "美國職業橄欖球聯賽 (NFL)": "americanfootball_nfl",
     },
 }
+
+ALL_MARKET_OPTIONS = ["不讓分 (獨贏)", "讓分盤", "大小分"]
 
 
 def check_password(target_password="900812"):
@@ -89,11 +99,23 @@ def fetch_all_markets(api_key, sport_key):
     all_options = []
 
     for match in data:
+        # 解析開賽時間 (轉為本地時間 UTC+8)
+        commence_utc = match.get("commence_time", "")
+        if commence_utc:
+            dt_utc = datetime.datetime.fromisoformat(commence_utc.replace("Z", "+00:00"))
+            dt_local = dt_utc + datetime.timedelta(hours=8)
+            time_str = dt_local.strftime("%Y-%m-%d %H:%M")
+        else:
+            time_str = "時間未定"
+
+        # 解析主客隊中英文名稱
         home_en = match.get("home_team", "")
         away_en = match.get("away_team", "")
         home_cn = TEAM_NAME_MAP.get(home_en, home_en)
         away_cn = TEAM_NAME_MAP.get(away_en, away_en)
-        match_title = f"{home_cn} (主) vs {away_cn} (客)"
+
+        # 組合雙語賽事標題
+        match_title = f"{home_cn} {home_en} (主) vs {away_cn} {away_en} (客)"
 
         if match.get("bookmakers"):
             bookmaker = match["bookmakers"][0]
@@ -101,22 +123,25 @@ def fetch_all_markets(api_key, sport_key):
             for market in bookmaker.get("markets", []):
                 m_key = market["key"]
 
+                # 1. 不讓分 (獨贏)
                 if m_key == "h2h":
                     for outcome in market["outcomes"]:
-                        team_cn = TEAM_NAME_MAP.get(outcome["name"], outcome["name"])
+                        team_en = outcome["name"]
+                        team_cn = TEAM_NAME_MAP.get(team_en, team_en)
                         odds = outcome["price"]
                         p_win = round(1 / odds, 4) if odds > 0 else 0.5
                         
-                        if outcome["name"] == "Draw":
-                            pick_name = "和局"
+                        if team_en == "Draw":
+                            pick_name = "全場和局 (Draw)"
                         else:
-                            is_home = outcome["name"] == home_en
-                            pick_name = f"{team_cn} 不讓分勝 ({'主' if is_home else '客'})"
+                            is_home = team_en == home_en
+                            pick_name = f"{team_cn} {team_en} 不讓分勝 ({'主' if is_home else '客'})"
 
                         ev = round((p_win * odds) - 1, 3)
 
                         all_options.append({
                             "match": match_title,
+                            "match_time": time_str,
                             "type": "不讓分 (獨贏)",
                             "pick": pick_name,
                             "detail": f"賠率 {odds}",
@@ -125,19 +150,21 @@ def fetch_all_markets(api_key, sport_key):
                             "ev": ev,
                         })
 
+                # 2. 讓分盤
                 elif m_key == "spreads":
                     for outcome in market["outcomes"]:
-                        team_cn = TEAM_NAME_MAP.get(outcome["name"], outcome["name"])
+                        team_en = outcome["name"]
+                        team_cn = TEAM_NAME_MAP.get(team_en, team_en)
                         point = outcome.get("point", 0)
                         point_str = f"+{point}" if point > 0 else str(point)
-                        is_home = outcome["name"] == home_en
-                        pick_name = f"{team_cn} 讓分 ({point_str})"
+                        pick_name = f"{team_cn} {team_en} 讓分 ({point_str})"
                         odds = outcome["price"]
                         p_win = round(1 / odds, 4) if odds > 0 else 0.5
                         ev = round((p_win * odds) - 1, 3)
 
                         all_options.append({
                             "match": match_title,
+                            "match_time": time_str,
                             "type": "讓分盤",
                             "pick": pick_name,
                             "detail": f"盤口 ({point_str}) @ 賠率 {odds}",
@@ -146,9 +173,11 @@ def fetch_all_markets(api_key, sport_key):
                             "ev": ev,
                         })
 
+                # 3. 大小分
                 elif m_key == "totals":
                     for outcome in market["outcomes"]:
-                        name_cn = "大分" if outcome["name"].lower() == "over" else "小分"
+                        name_en = outcome["name"]
+                        name_cn = "大分 Over" if name_en.lower() == "over" else "小分 Under"
                         point = outcome.get("point", 0)
                         pick_name = f"全場大小分：{name_cn} ({point})"
                         odds = outcome["price"]
@@ -157,6 +186,7 @@ def fetch_all_markets(api_key, sport_key):
 
                         all_options.append({
                             "match": match_title,
+                            "match_time": time_str,
                             "type": "大小分",
                             "pick": pick_name,
                             "detail": f"{point} {name_cn} @ 賠率 {odds}",
@@ -168,125 +198,6 @@ def fetch_all_markets(api_key, sport_key):
     return pd.DataFrame(all_options), None
 
 
-if check_password("900812"):
-    st.sidebar.success("✅ 權限驗證通過")
-    if st.sidebar.button("🔒 登出系統"):
-        st.session_state["password_correct"] = False
-        st.rerun()
-
-    st.title("⚡ ODD-HUNTER ｜ 穩健過關率 AI x 組合防禦決策中心")
-    st.caption("高勝率篩選 ｜ 系統 2 串 1 容錯組合 ｜ 凱利資金防禦系統")
-
-    api_key = "c0d0209bb272cde2bb4464ce0a93ea56"
-
-    st.sidebar.header("⚙️ 賽事與策略設定")
-    selected_category = st.sidebar.selectbox("1. 選擇體育項目", list(SPORT_CATEGORIES.keys()))
-    available_leagues = SPORT_CATEGORIES[selected_category]
-    selected_league_name = st.sidebar.selectbox("2. 選擇特定聯賽", list(available_leagues.keys()))
-    selected_sport_key = available_leagues[selected_league_name]
-
-    market_types_selected = st.sidebar.multiselect(
-        "3. 選擇顯示玩法",
-        ["不讓分 (獨贏)", "讓分盤", "大小分"],
-        default=["不讓分 (獨贏)", "讓分盤", "大小分"],
-    )
-
-    budget = st.sidebar.number_input("總投注資金 ($)", min_value=10, value=100, step=10)
-
-    if st.sidebar.button("🔄 刷新盤口數據"):
-        st.cache_data.clear()
-        st.rerun()
-
-    with st.spinner(f"📡 抓取 【{selected_league_name}】 數據中..."):
-        df_all, error_msg = fetch_all_markets(api_key, selected_sport_key)
-
-    if error_msg:
-        st.error(f"❌ 數據載入失敗：{error_msg}")
-    else:
-        tab1, tab2 = st.tabs(["🛡️ 容錯串關試算 (提高勝率)", "🔥 AI 精選高勝率最穩組合"])
-
-        with tab1:
-            st.subheader(f"🌐 【{selected_league_name}】 即時盤口清單")
-            st.info("💡 **高過關率提示**：建議勾選 3 場，並使用下方「容錯拆單（如 2 串 1 組合）」，即使錯 1 場也能獲利保本！")
-
-            if df_all is None or df_all.empty:
-                st.warning("目前無即時開盤賽事。")
-            else:
-                matches = df_all["match"].unique()
-                selected_items = []
-
-                for m in matches:
-                    with st.expander(f"🏆 賽事：{m}", expanded=True):
-                        sub_df = df_all[df_all["match"] == m]
-                        num_cols = len(market_types_selected)
-                        cols = st.columns(num_cols)
-
-                        for col, m_type in zip(cols, market_types_selected):
-                            with col:
-                                st.markdown(f"**【{m_type}】**")
-                                type_df = sub_df[sub_df["type"] == m_type]
-
-                                for idx, row in type_df.iterrows():
-                                    label = f"{row['pick']} | 賠率 {row['odds']} (勝率 {row['win_prob']:.0%})"
-                                    if st.checkbox(label, key=f"chk_{idx}"):
-                                        selected_items.append(row)
-
-                st.markdown("---")
-                st.subheader("🧾 你的自選組合與容錯拆單試算")
-
-                if len(selected_items) >= 2:
-                    st.write(f"已選擇 **{len(selected_items)}** 個選項：")
-                    for item in selected_items:
-                        st.success(f"📌 **{item['match']}** ➔ **{item['pick']}** （賠率 {item['odds']}）")
-
-                    # 計算純 N 串 1
-                    raw_odds = 1.0
-                    raw_prob = 1.0
-                    for item in selected_items:
-                        raw_odds *= item['odds']
-                        raw_prob *= item['win_prob']
-
-                    # 計算 2 串 1 容錯拆單 (System Bet)
-                    combos_2 = list(itertools.combinations(selected_items, 2))
-                    num_combos = len(combos_2)
-                    unit_budget = round(budget / num_combos, 2)
-
-                    st.markdown(f"""
-                    <div style="background-color:#0f172a; padding:20px; border-radius:10px; border:2px solid #10b981;">
-                        <h3 style="color:#10b981; margin-top:0;">🛡️ 高勝率「2 串 1 容錯組合」試算 (拆解為 {num_combos} 組)</h3>
-                        <p style="font-size:16px;">💵 <b>每組分配資金</b>：$ {unit_budget} 元 (總預算 $ {budget} 元)</p>
-                        <p style="font-size:16px;">🎯 <b>過關優勢</b>：只要猜中 2 場即開始派彩，錯 1 場也不會全輸！</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    st.write("▼ 拆解後的 2 串 1 子彩券組合細節：")
-                    for c_idx, combo in enumerate(combos_2, 1):
-                        c_odds = round(combo[0]['odds'] * combo[1]['odds'], 2)
-                        c_payout = round(unit_budget * c_odds, 2)
-                        st.info(
-                            f"**組合 #{c_idx}**：`{combo[0]['pick']}` + `{combo[1]['pick']}` "
-                            f"➔ **總賠率 {c_odds} 倍** | 命中可得：**$ {c_payout} 元**"
-                        )
-                else:
-                    st.warning("💡 請在上方至少勾選 2 個選項以進行容錯組合試算！")
-
-        with tab2:
-            st.subheader("🔥 AI 推薦：高勝率、低風險精選單")
-            st.caption("優先篩選勝率高、賠率適中 (1.30 ~ 1.75) 的穩健選項")
-
-            if df_all is not None and not df_all.empty:
-                # 篩選穩健賠率與高勝率
-                stable_df = df_all[(df_all['odds'] >= 1.30) & (df_all['odds'] <= 1.75)]
-                
-                if not stable_df.empty:
-                    for match_name in stable_df['match'].unique():
-                        m_df = stable_df[stable_df['match'] == match_name]
-                        st.markdown(f"#### 🏆 {match_name}")
-                        for _, r in m_df.iterrows():
-                            st.success(
-                                f"👉 **穩健推薦**：【**{r['pick']}**】\n"
-                                f"* **賠率**：`{r['odds']}` | **勝率估計**：`{r['win_prob']:.1%}`\n"
-                                f"* **策略建議**：適合做為「2 串 1 容錯單」的核心基底場次"
-                            )
-                else:
-                    st.info("今日賽事無 1.30 ~ 1.75 賠率區間的穩健選項。")
+# -------------------------------------------------------------------
+# 🚀 主程式頁面
+# ------------------------------------------------
