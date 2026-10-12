@@ -10,7 +10,7 @@ import streamlit as st
 # 頁面基本設定
 # -------------------------------------------------------------------
 st.set_page_config(
-    page_title="⚡ ODD-HUNTER ｜ 全球體育高過關率 AI x 組合防禦決策中心",
+    page_title="⚡ ODD-HUNTER ｜ 穩健過關率 AI x 組合防禦決策中心",
     layout="wide",
 )
 
@@ -19,7 +19,9 @@ TEAM_NAME_MAP = {
     "Arsenal": "阿仙奴", "Leeds United": "列斯聯", "Chelsea": "車路士",
     "Bournemouth": "般尼茅夫", "Manchester United": "曼聯", "Tottenham Hotspur": "熱刺",
     "Liverpool": "利物浦", "Manchester City": "曼城", "Aston Villa": "阿士東維拉",
-    "Newcastle United": "紐卡素", "West Ham United": "韋斯咸",
+    "Newcastle United": "紐卡素", "West Ham United": "韋斯咸", "Fulham": "富咸",
+    "Hull City": "侯城", "Ipswich Town": "葉士域治", "Brighton": "白禮頓",
+    "Crystal Palace": "水晶宮",
     # 足球 - 西甲 (La Liga)
     "Real Madrid": "皇家馬德里", "Barcelona": "巴塞隆拿", "Atletico Madrid": "馬德里體育會",
     # 籃球 - NBA
@@ -99,7 +101,6 @@ def fetch_all_markets(api_key, sport_key):
     all_options = []
 
     for match in data:
-        # 解析開賽時間 (轉為本地時間 UTC+8)
         commence_utc = match.get("commence_time", "")
         if commence_utc:
             dt_utc = datetime.datetime.fromisoformat(commence_utc.replace("Z", "+00:00"))
@@ -108,96 +109,14 @@ def fetch_all_markets(api_key, sport_key):
         else:
             time_str = "時間未定"
 
-        # 解析主客隊中英文名稱
         home_en = match.get("home_team", "")
         away_en = match.get("away_team", "")
         home_cn = TEAM_NAME_MAP.get(home_en, home_en)
         away_cn = TEAM_NAME_MAP.get(away_en, away_en)
 
-        # 組合雙語賽事標題
         match_title = f"{home_cn} {home_en} (主) vs {away_cn} {away_en} (客)"
 
         if match.get("bookmakers"):
             bookmaker = match["bookmakers"][0]
 
             for market in bookmaker.get("markets", []):
-                m_key = market["key"]
-
-                # 1. 不讓分 (獨贏)
-                if m_key == "h2h":
-                    for outcome in market["outcomes"]:
-                        team_en = outcome["name"]
-                        team_cn = TEAM_NAME_MAP.get(team_en, team_en)
-                        odds = outcome["price"]
-                        p_win = round(1 / odds, 4) if odds > 0 else 0.5
-                        
-                        if team_en == "Draw":
-                            pick_name = "全場和局 (Draw)"
-                        else:
-                            is_home = team_en == home_en
-                            pick_name = f"{team_cn} {team_en} 不讓分勝 ({'主' if is_home else '客'})"
-
-                        ev = round((p_win * odds) - 1, 3)
-
-                        all_options.append({
-                            "match": match_title,
-                            "match_time": time_str,
-                            "type": "不讓分 (獨贏)",
-                            "pick": pick_name,
-                            "detail": f"賠率 {odds}",
-                            "odds": odds,
-                            "win_prob": p_win,
-                            "ev": ev,
-                        })
-
-                # 2. 讓分盤
-                elif m_key == "spreads":
-                    for outcome in market["outcomes"]:
-                        team_en = outcome["name"]
-                        team_cn = TEAM_NAME_MAP.get(team_en, team_en)
-                        point = outcome.get("point", 0)
-                        point_str = f"+{point}" if point > 0 else str(point)
-                        pick_name = f"{team_cn} {team_en} 讓分 ({point_str})"
-                        odds = outcome["price"]
-                        p_win = round(1 / odds, 4) if odds > 0 else 0.5
-                        ev = round((p_win * odds) - 1, 3)
-
-                        all_options.append({
-                            "match": match_title,
-                            "match_time": time_str,
-                            "type": "讓分盤",
-                            "pick": pick_name,
-                            "detail": f"盤口 ({point_str}) @ 賠率 {odds}",
-                            "odds": odds,
-                            "win_prob": p_win,
-                            "ev": ev,
-                        })
-
-                # 3. 大小分
-                elif m_key == "totals":
-                    for outcome in market["outcomes"]:
-                        name_en = outcome["name"]
-                        name_cn = "大分 Over" if name_en.lower() == "over" else "小分 Under"
-                        point = outcome.get("point", 0)
-                        pick_name = f"全場大小分：{name_cn} ({point})"
-                        odds = outcome["price"]
-                        p_win = round(1 / odds, 4) if odds > 0 else 0.5
-                        ev = round((p_win * odds) - 1, 3)
-
-                        all_options.append({
-                            "match": match_title,
-                            "match_time": time_str,
-                            "type": "大小分",
-                            "pick": pick_name,
-                            "detail": f"{point} {name_cn} @ 賠率 {odds}",
-                            "odds": odds,
-                            "win_prob": p_win,
-                            "ev": ev,
-                        })
-
-    return pd.DataFrame(all_options), None
-
-
-# -------------------------------------------------------------------
-# 🚀 主程式頁面
-# ------------------------------------------------
