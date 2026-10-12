@@ -10,7 +10,7 @@ import streamlit as st
 # 頁面基本設定
 # -------------------------------------------------------------------
 st.set_page_config(
-    page_title="⚡ ODD-HUNTER ｜ 全球體育多模式決策中心",
+    page_title="⚡ ODD-HUNTER ｜ 澳門彩票全玩法體育 AI 決策中心",
     layout="wide",
 )
 
@@ -57,7 +57,22 @@ SPORT_CATEGORIES = {
     },
 }
 
-ALL_MARKET_OPTIONS = ["不讓分 (獨贏)", "讓分盤", "大小分"]
+# 圖 1 足球專屬全玩法字典
+SOCCER_MARKETS = [
+    "全場三合一 (獨贏/讓分/大小)", "波膽 (正確比數)", "波膽組合",
+    "全場入球總數", "入球單/雙數", "半場/全場賽果", "球隊入球數",
+    "最先入球球隊", "角球數賠率", "上/下半場入球較多",
+    "上半場三合一", "上半場角球數", "上半場波膽", "上半場波膽組合",
+    "上半場入球單/雙數", "上半場球隊入球數"
+]
+
+# 圖 2 籃球專屬全玩法字典
+BASKETBALL_MARKETS = [
+    "全場三合一 (獨贏/讓分/大小)", "球隊取勝分差", "總得分單/雙數",
+    "球隊得分上下盤 (大小)", "半全場賽果", "上半場二合一賠率"
+]
+
+DEFAULT_MARKETS = ["不讓分 (獨贏)", "讓分盤", "大小分"]
 
 
 def check_password(target_password="900812"):
@@ -208,12 +223,12 @@ if check_password("900812"):
         st.session_state["password_correct"] = False
         st.rerun()
 
-    st.title("⚡ ODD-HUNTER ｜ 全球體育多模式決策中心")
-    st.caption("單場直購 ｜ 純過關串關 ｜ 2 串 1 容錯組合 ｜ 動態切換")
+    st.title("⚡ ODD-HUNTER ｜ 澳門彩票全玩法 AI 體育決策中心")
+    st.caption("全賽事玩法 ｜ 單場 / 串關 / 2 串 1 容錯組合 ｜ 實時盤口解析")
 
     api_key = "c0d0209bb272cde2bb4464ce0a93ea56"
 
-    st.sidebar.header("⚙️ 賽事與策略設定")
+    st.sidebar.header("⚙️ 賽事與玩法設定")
     selected_category = st.sidebar.selectbox("1. 選擇體育項目", list(SPORT_CATEGORIES.keys()))
     available_leagues = SPORT_CATEGORIES[selected_category]
     selected_league_name = st.sidebar.selectbox("2. 選擇特定聯賽", list(available_leagues.keys()))
@@ -224,9 +239,17 @@ if check_password("900812"):
         ["🛡️ 系統 2 串 1 容錯組合 (推高勝率)", "🎟️ 純 N 串 1 過關 (追求高回報)", "🎯 單場投注 (不買串 / 獨立單)"]
     )
 
+    # 🎯 根據選擇的運動動態載入圖片中的對應玩法選單
+    if "足球" in selected_category:
+        available_market_list = SOCCER_MARKETS
+    elif "籃球" in selected_category:
+        available_market_list = BASKETBALL_MARKETS
+    else:
+        available_market_list = DEFAULT_MARKETS
+
     user_selected_markets = st.sidebar.multiselect(
-        "4. 選擇顯示玩法 (未選則全部顯示)",
-        ALL_MARKET_OPTIONS,
+        "4. 選擇顯示玩法 (未選則預設全顯示)",
+        available_market_list,
         default=[]
     )
 
@@ -247,7 +270,7 @@ if check_password("900812"):
         tab1, tab2 = st.tabs(["📋 自由勾選與注單計算", "🔥 AI 精選高勝率最穩組合"])
 
         with tab1:
-            st.subheader(f"🌐 【{selected_league_name}】 即時賽事與盤口清單")
+            st.subheader(f"🌐 【{selected_league_name}】 即時賽事與全玩法清單")
             st.caption(f"目前下注模式：**{bet_mode}**")
 
             if df_all is None or df_all.empty:
@@ -269,7 +292,7 @@ if check_password("900812"):
                                 type_df = sub_df[sub_df["type"] == m_type]
 
                                 if type_df.empty:
-                                    st.caption("無可提供盤口")
+                                    st.caption("請開啟 App 對照最新盤口")
                                 else:
                                     for idx, row in type_df.iterrows():
                                         chk_key = f"chk_{m_idx}_{col_idx}_{idx}"
