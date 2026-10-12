@@ -105,15 +105,15 @@ def check_password(target_password="900812"):
 
 
 # -------------------------------------------------------------------
-# 📡 數據解析：全體育多玩法與白話說明
+# 📡 數據解析：穩定高相容性盤口抓取
 # -------------------------------------------------------------------
 @st.cache_data(ttl=600)
 def fetch_all_markets(api_key, sport_key):
     if not api_key:
         return None, "請設定 API Key！"
 
-    # 請求包含 h2h (不讓分/獨贏), spreads (讓分), totals (大小分), h2h_h1 (上半場獨贏), spreads_h1 (上半場讓分), totals_h1 (上半場大小)
-    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={api_key}&regions=eu&markets=h2h,spreads,totals,h2h_h1,spreads_h1,totals_h1&oddsFormat=decimal"
+    # 使用所有體育項目通用支援的 3 大標準盤口 (h2h, spreads, totals)
+    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={api_key}&regions=eu&markets=h2h,spreads,totals&oddsFormat=decimal"
     try:
         response = requests.get(url, timeout=10)
         if response.status_code != 200:
@@ -143,16 +143,16 @@ def fetch_all_markets(api_key, sport_key):
             for market in bookmaker.get("markets", []):
                 m_key = market["key"]
 
-                # 1. 全場獨贏盤 (H2H)
+                # 1. 獨贏盤 (H2H)
                 if m_key == "h2h":
                     for outcome in market["outcomes"]:
                         team_cn = TEAM_NAME_MAP.get(outcome["name"], outcome["name"])
                         if outcome["name"] == "Draw":
-                            pick_name = "全場和局"
+                            pick_name = "和局"
                             p_win = 0.25
                         else:
                             is_home = outcome["name"] == home_en
-                            pick_name = f"{team_cn} 全場不讓分勝 ({'主場' if is_home else '客場'})"
+                            pick_name = f"{team_cn} 不讓分勝 ({'主場' if is_home else '客場'})"
                             p_win = 0.48 if is_home else 0.35
 
                         odds = outcome["price"]
@@ -168,14 +168,14 @@ def fetch_all_markets(api_key, sport_key):
                             "ev": ev,
                         })
 
-                # 2. 全場讓分盤 (Spreads)
+                # 2. 讓分盤 (Spreads)
                 elif m_key == "spreads":
                     for outcome in market["outcomes"]:
                         team_cn = TEAM_NAME_MAP.get(outcome["name"], outcome["name"])
                         point = outcome.get("point", 0)
                         point_str = f"+{point}" if point > 0 else str(point)
                         is_home = outcome["name"] == home_en
-                        pick_name = f"{team_cn} 全場讓分 ({point_str}) ({'主場' if is_home else '客場'})"
+                        pick_name = f"{team_cn} 讓分 ({point_str}) ({'主場' if is_home else '客場'})"
 
                         odds = outcome["price"]
                         p_win = 0.50
@@ -191,7 +191,7 @@ def fetch_all_markets(api_key, sport_key):
                             "ev": ev,
                         })
 
-                # 3. 全場大小分 (Totals)
+                # 3. 大小分 (Totals)
                 elif m_key == "totals":
                     for outcome in market["outcomes"]:
                         name_cn = "大分" if outcome["name"].lower() == "over" else "小分"
@@ -205,75 +205,6 @@ def fetch_all_markets(api_key, sport_key):
                         all_options.append({
                             "match": match_title,
                             "type": "大小分",
-                            "pick": pick_name,
-                            "detail": f"{point} {name_cn} @ 賠率 {odds}",
-                            "odds": odds,
-                            "win_prob": p_win,
-                            "ev": ev,
-                        })
-
-                # 4. 上半場不讓分 (H2H H1)
-                elif m_key == "h2h_h1":
-                    for outcome in market["outcomes"]:
-                        team_cn = TEAM_NAME_MAP.get(outcome["name"], outcome["name"])
-                        if outcome["name"] == "Draw":
-                            pick_name = "上半場和局"
-                            p_win = 0.30
-                        else:
-                            is_home = outcome["name"] == home_en
-                            pick_name = f"{team_cn} 上半場不讓分勝 ({'主場' if is_home else '客場'})"
-                            p_win = 0.45 if is_home else 0.35
-
-                        odds = outcome["price"]
-                        ev = round((p_win * odds) - 1, 3)
-
-                        all_options.append({
-                            "match": match_title,
-                            "type": "上半場不讓分",
-                            "pick": pick_name,
-                            "detail": f"賠率 {odds}",
-                            "odds": odds,
-                            "win_prob": p_win,
-                            "ev": ev,
-                        })
-
-                # 5. 上半場讓分 (Spreads H1)
-                elif m_key == "spreads_h1":
-                    for outcome in market["outcomes"]:
-                        team_cn = TEAM_NAME_MAP.get(outcome["name"], outcome["name"])
-                        point = outcome.get("point", 0)
-                        point_str = f"+{point}" if point > 0 else str(point)
-                        is_home = outcome["name"] == home_en
-                        pick_name = f"{team_cn} 上半場讓分 ({point_str}) ({'主場' if is_home else '客場'})"
-
-                        odds = outcome["price"]
-                        p_win = 0.50
-                        ev = round((p_win * odds) - 1, 3)
-
-                        all_options.append({
-                            "match": match_title,
-                            "type": "上半場讓分",
-                            "pick": pick_name,
-                            "detail": f"盤口 ({point_str}) @ 賠率 {odds}",
-                            "odds": odds,
-                            "win_prob": p_win,
-                            "ev": ev,
-                        })
-
-                # 6. 上半場大小分 (Totals H1)
-                elif m_key == "totals_h1":
-                    for outcome in market["outcomes"]:
-                        name_cn = "大分" if outcome["name"].lower() == "over" else "小分"
-                        point = outcome.get("point", 0)
-                        pick_name = f"上半場大小分：{name_cn} ({point} 球/分)"
-
-                        odds = outcome["price"]
-                        p_win = 0.50
-                        ev = round((p_win * odds) - 1, 3)
-
-                        all_options.append({
-                            "match": match_title,
-                            "type": "上半場大小分",
                             "pick": pick_name,
                             "detail": f"{point} {name_cn} @ 賠率 {odds}",
                             "odds": odds,
@@ -295,12 +226,12 @@ if check_password("900812"):
 
     st.title("⚡ ODD-HUNTER ｜ 全球體育全玩法賠率獵人 AI x 實體串關決策中心")
     st.caption(
-        "全體育聯賽與全玩法選擇 ｜ 直白盤口細節標示 ｜ 擬真運彩串關投注單試算"
+        "全體育聯賽動態選擇 ｜ 直白盤口細節標示 ｜ 擬真運彩串關投注單試算"
     )
 
     api_key = "c0d0209bb272cde2bb4464ce0a93ea56"
 
-    # 1. 側邊欄：多層選單（先選運動，再選聯賽，最後勾選玩法）
+    # 1. 側邊欄控制項
     st.sidebar.header("⚙️ 賽事與玩法選擇")
     
     selected_category = st.sidebar.selectbox(
@@ -315,14 +246,9 @@ if check_password("900812"):
     )
     selected_sport_key = available_leagues[selected_league_name]
 
-    ALL_MARKET_OPTIONS = [
-        "不讓分 (獨贏)", "讓分盤", "大小分",
-        "上半場不讓分", "上半場讓分", "上半場大小分"
-    ]
-
     market_types_selected = st.sidebar.multiselect(
         "3. 選擇顯示下注玩法",
-        ALL_MARKET_OPTIONS,
+        ["不讓分 (獨贏)", "讓分盤", "大小分"],
         default=["不讓分 (獨贏)", "讓分盤", "大小分"],
     )
 
@@ -335,7 +261,7 @@ if check_password("900812"):
         st.rerun()
 
     # 2. 載入盤口資料
-    with st.spinner(f"📡 正在抓取 【{selected_league_name}】 全盤口與玩法數據中..."):
+    with st.spinner(f"📡 正在抓取 【{selected_league_name}】 全盤口賠率數據中..."):
         df_all, error_msg = fetch_all_markets(api_key, selected_sport_key)
 
     if error_msg:
@@ -349,9 +275,9 @@ if check_password("900812"):
         # TAB 1: 自由勾選全盤口
         # ---------------------------------------------------------------
         with tab1:
-            st.subheader(f"🌐 【{selected_league_name}】 即時盤口與全玩法清單")
+            st.subheader(f"🌐 【{selected_league_name}】 即時盤口與玩法清單")
             st.info(
-                "💡 **說明**：請在下方列表中勾選你想串關的選項（可跨場次、跨全場/半場玩法），下方會自動為你產出彩券試算！"
+                "💡 **說明**：請在下方列表中勾選你想串關的選項（可跨場次、跨玩法組合），下方會自動為你產出彩券試算！"
             )
 
             if not market_types_selected:
@@ -366,12 +292,11 @@ if check_password("900812"):
                     with st.expander(f"🏆 賽事：{m}", expanded=True):
                         sub_df = df_all[df_all["match"] == m]
 
-                        num_cols = min(len(market_types_selected), 3)
+                        num_cols = len(market_types_selected)
                         cols = st.columns(num_cols)
 
-                        for idx_m, m_type in enumerate(market_types_selected):
-                            col_target = cols[idx_m % num_cols]
-                            with col_target:
+                        for col, m_type in zip(cols, market_types_selected):
+                            with col:
                                 st.markdown(f"**【{m_type}】**")
                                 type_df = sub_df[sub_df["type"] == m_type]
 
