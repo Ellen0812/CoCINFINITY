@@ -10,7 +10,7 @@ import streamlit as st
 # 頁面基本設定
 # -------------------------------------------------------------------
 st.set_page_config(
-    page_title="⚡ ODD-HUNTER ｜ 澳門彩票全玩法體育 AI 決策中心",
+    page_title="⚡ ODD-HUNTER ｜ 澳門彩票全玩法 AI 體育決策中心",
     layout="wide",
 )
 
@@ -57,8 +57,11 @@ SPORT_CATEGORIES = {
     },
 }
 
-# 圖 1 足球專屬全玩法字典
+DEFAULT_MARKETS = ["不讓分 (獨贏)", "讓分盤", "大小分"]
+
+# ⚽ 足球專屬全玩法字典 (對照澳門彩票圖1)
 SOCCER_MARKETS = [
+    "不讓分 (獨贏)", "讓分盤", "大小分",
     "全場三合一 (獨贏/讓分/大小)", "波膽 (正確比數)", "波膽組合",
     "全場入球總數", "入球單/雙數", "半場/全場賽果", "球隊入球數",
     "最先入球球隊", "角球數賠率", "上/下半場入球較多",
@@ -66,13 +69,12 @@ SOCCER_MARKETS = [
     "上半場入球單/雙數", "上半場球隊入球數"
 ]
 
-# 圖 2 籃球專屬全玩法字典
+# 🏀 籃球專屬全玩法字典 (對照澳門彩票圖2)
 BASKETBALL_MARKETS = [
+    "不讓分 (獨贏)", "讓分盤", "大小分",
     "全場三合一 (獨贏/讓分/大小)", "球隊取勝分差", "總得分單/雙數",
     "球隊得分上下盤 (大小)", "半全場賽果", "上半場二合一賠率"
 ]
-
-DEFAULT_MARKETS = ["不讓分 (獨贏)", "讓分盤", "大小分"]
 
 
 def check_password(target_password="900812"):
@@ -239,7 +241,6 @@ if check_password("900812"):
         ["🛡️ 系統 2 串 1 容錯組合 (推高勝率)", "🎟️ 純 N 串 1 過關 (追求高回報)", "🎯 單場投注 (不買串 / 獨立單)"]
     )
 
-    # 🎯 根據選擇的運動動態載入圖片中的對應玩法選單
     if "足球" in selected_category:
         available_market_list = SOCCER_MARKETS
     elif "籃球" in selected_category:
@@ -253,7 +254,8 @@ if check_password("900812"):
         default=[]
     )
 
-    display_markets = user_selected_markets if user_selected_markets else ALL_MARKET_OPTIONS
+    # 修復 NameError：當使用者未選擇時，預設顯示全玩法清單
+    display_markets = user_selected_markets if user_selected_markets else DEFAULT_MARKETS
 
     budget = st.sidebar.number_input("總投注資金 ($)", min_value=10, value=100, step=10)
 
