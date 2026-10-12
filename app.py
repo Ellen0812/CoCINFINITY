@@ -10,8 +10,9 @@ import streamlit as st
 # 頁面基本設定
 # -------------------------------------------------------------------
 st.set_page_config(
-    page_title="⚡ ODD-HUNTER ｜ 澳門彩票全玩法 AI 體育決策中心",
+    page_title="⚡ ODD-HUNTER ｜ 全平台響應式 AI 體育決策中心",
     layout="wide",
+    initial_sidebar_state="expanded"
 )
 
 TEAM_NAME_MAP = {
@@ -22,7 +23,7 @@ TEAM_NAME_MAP = {
     "Newcastle United": "紐卡素", "West Ham United": "韋斯咸", "Fulham": "富咸",
     "Hull City": "侯城", "Ipswich Town": "葉士域治", "Brighton": "白禮頓",
     "Crystal Palace": "水晶宮", "Brentford": "賓福特", "Everton": "愛華頓",
-    "Coventry City": "高雲地利",
+    "Coventry City": "高雲地利", "Detroit Pistons": "底特律活塞", "Boston Celtics": "波士頓塞爾特人",
     # 足球 - 西甲 (La Liga)
     "Real Madrid": "皇家馬德里", "Barcelona": "巴塞隆拿", "Atletico Madrid": "馬德里體育會",
     # 籃球 - NBA
@@ -59,21 +60,15 @@ SPORT_CATEGORIES = {
 
 DEFAULT_MARKETS = ["不讓分 (獨贏)", "讓分盤", "大小分"]
 
-# ⚽ 足球專屬全玩法字典 (對照澳門彩票圖1)
 SOCCER_MARKETS = [
-    "不讓分 (獨贏)", "讓分盤", "大小分",
-    "全場三合一 (獨贏/讓分/大小)", "波膽 (正確比數)", "波膽組合",
-    "全場入球總數", "入球單/雙數", "半場/全場賽果", "球隊入球數",
-    "最先入球球隊", "角球數賠率", "上/下半場入球較多",
-    "上半場三合一", "上半場角球數", "上半場波膽", "上半場波膽組合",
-    "上半場入球單/雙數", "上半場球隊入球數"
+    "全場三合一 (獨贏/讓分/大小)", "不讓分 (獨贏)", "讓分盤", "大小分",
+    "波膽 (正確比數)", "波膽組合", "全場入球總數", "入球單/雙數",
+    "半場/全場賽果", "球隊入球數", "最先入球球隊", "角球數賠率"
 ]
 
-# 🏀 籃球專屬全玩法字典 (對照澳門彩票圖2)
 BASKETBALL_MARKETS = [
-    "不讓分 (獨贏)", "讓分盤", "大小分",
-    "全場三合一 (獨贏/讓分/大小)", "球隊取勝分差", "總得分單/雙數",
-    "球隊得分上下盤 (大小)", "半全場賽果", "上半場二合一賠率"
+    "全場三合一 (獨贏/讓分/大小)", "不讓分 (獨贏)", "讓分盤", "大小分",
+    "球隊取勝分差", "總得分單/雙數", "球隊得分上下盤 (大小)", "半全場賽果"
 ]
 
 
@@ -221,12 +216,12 @@ def fetch_all_markets(api_key, sport_key):
 # -------------------------------------------------------------------
 if check_password("900812"):
     st.sidebar.success("✅ 權限驗證通過")
-    if st.sidebar.button("🔒 登出系統"):
+    if st.sidebar.button("🔒 登出系統", use_container_width=True):
         st.session_state["password_correct"] = False
         st.rerun()
 
-    st.title("⚡ ODD-HUNTER ｜ 澳門彩票全玩法 AI 體育決策中心")
-    st.caption("全賽事玩法 ｜ 單場 / 串關 / 2 串 1 容錯組合 ｜ 實時盤口解析")
+    st.title("⚡ ODD-HUNTER ｜ 全平台響應式 AI 體育決策中心")
+    st.caption("📱 手機 / 💻 電腦版最佳化 ｜ 單場 / 串關 / 2 串 1 容錯組合")
 
     api_key = "c0d0209bb272cde2bb4464ce0a93ea56"
 
@@ -254,12 +249,11 @@ if check_password("900812"):
         default=[]
     )
 
-    # 修復 NameError：當使用者未選擇時，預設顯示全玩法清單
     display_markets = user_selected_markets if user_selected_markets else DEFAULT_MARKETS
 
     budget = st.sidebar.number_input("總投注資金 ($)", min_value=10, value=100, step=10)
 
-    if st.sidebar.button("🔄 刷新盤口數據"):
+    if st.sidebar.button("🔄 刷新盤口數據", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
@@ -285,24 +279,23 @@ if check_password("900812"):
                     sub_df = df_all[df_all["match"] == m]
                     m_time = sub_df["match_time"].iloc[0]
 
-                    with st.expander(f"🏆 賽事：{m} ｜ ⏰ 開賽時間：{m_time}", expanded=True):
-                        cols = st.columns(len(display_markets))
-
+                    with st.expander(f"🏆 {m}\n⏰ 開賽時間：{m_time}", expanded=True):
                         for col_idx, m_type in enumerate(display_markets):
-                            with cols[col_idx]:
-                                st.markdown(f"**【{m_type}】**")
+                            # 當選取「三合一」時，直接聯集呈現三種基礎玩法
+                            if "三合一" in m_type:
+                                type_df = sub_df
+                            else:
                                 type_df = sub_df[sub_df["type"] == m_type]
 
-                                if type_df.empty:
-                                    st.caption("請開啟 App 對照最新盤口")
-                                else:
-                                    for idx, row in type_df.iterrows():
-                                        chk_key = f"chk_{m_idx}_{col_idx}_{idx}"
-                                        label = f"{row['pick']} | 賠率 {row['odds']} (勝率 {row['win_prob']:.0%})"
-                                        if st.checkbox(label, key=chk_key):
-                                            selected_items.append(row)
+                            if not type_df.empty:
+                                st.markdown(f"**【{m_type}】**")
+                                for idx, row in type_df.iterrows():
+                                    chk_key = f"chk_{m_idx}_{col_idx}_{idx}"
+                                    label = f"{row['pick']} | 賠率 {row['odds']} (勝率 {row['win_prob']:.0%})"
+                                    if st.checkbox(label, key=chk_key):
+                                        selected_items.append(row)
+                                st.markdown("---")
 
-                st.markdown("---")
                 st.subheader("🧾 你的自選投注單試算")
 
                 if len(selected_items) >= 1:
@@ -321,10 +314,10 @@ if check_password("900812"):
                             unit_budget = round(budget / num_combos, 2)
 
                             st.markdown(f"""
-                            <div style="background-color:#0f172a; padding:20px; border-radius:10px; border:2px solid #10b981;">
-                                <h3 style="color:#10b981; margin-top:0;">🛡️ 高勝率「2 串 1 容錯組合」 ({num_combos} 組)</h3>
-                                <p style="font-size:16px;">💵 <b>每組分配資金</b>：$ {unit_budget} 元 (總預算 $ {budget} 元)</p>
-                                <p style="font-size:16px;">🎯 <b>過關優勢</b>：只要命中 2 場即開始派彩，錯 1 場仍可收彩！</p>
+                            <div style="background-color:#0f172a; padding:15px; border-radius:10px; border:2px solid #10b981;">
+                                <h3 style="color:#10b981; margin-top:0; font-size:20px;">🛡️ 高勝率「2 串 1 容錯組合」 ({num_combos} 組)</h3>
+                                <p style="font-size:15px;">💵 <b>每組分配資金</b>：$ {unit_budget} 元 (總預算 $ {budget} 元)</p>
+                                <p style="font-size:15px;">🎯 <b>過關優勢</b>：只要命中 2 場即開始派彩，錯 1 場仍可收彩！</p>
                             </div>
                             """, unsafe_allow_html=True)
 
@@ -333,7 +326,7 @@ if check_password("900812"):
                                 c_odds = round(combo[0]['odds'] * combo[1]['odds'], 2)
                                 c_payout = round(unit_budget * c_odds, 2)
                                 st.info(
-                                    f"**組合 #{c_idx}**：`{combo[0]['pick']}` + `{combo[1]['pick']}` "
+                                    f"**組合 #{c_idx}**：`{combo[0]['pick']}` + `{combo[1]['pick']}`\n"
                                     f"➔ **賠率 {c_odds} 倍** | 預計派彩：**$ {c_payout} 元**"
                                 )
                         else:
@@ -351,13 +344,13 @@ if check_password("900812"):
                         payout = round(budget * raw_odds, 2)
 
                         st.markdown(f"""
-                        <div style="background-color:#1e293b; padding:20px; border-radius:10px; border:2px solid #3b82f6;">
-                            <h3 style="color:#60a5fa; margin-top:0;">🎟️ 純 {len(selected_items)} 串 1 彩券試算</h3>
-                            <p style="font-size:16px;">💵 <b>總投注預算</b>：$ {budget} 元</p>
-                            <p style="font-size:16px;">⚡ <b>串關總賠率</b>：<span style="color:#f59e0b; font-size:20px; font-weight:bold;">{raw_odds} 倍</span></p>
-                            <p style="font-size:16px;">🎯 <b>預估全過過關率</b>：{raw_prob:.1%}</p>
+                        <div style="background-color:#1e293b; padding:15px; border-radius:10px; border:2px solid #3b82f6;">
+                            <h3 style="color:#60a5fa; margin-top:0; font-size:20px;">🎟️ 純 {len(selected_items)} 串 1 彩券試算</h3>
+                            <p style="font-size:15px;">💵 <b>總投注預算</b>：$ {budget} 元</p>
+                            <p style="font-size:15px;">⚡ <b>串關總賠率</b>：<span style="color:#f59e0b; font-size:18px; font-weight:bold;">{raw_odds} 倍</span></p>
+                            <p style="font-size:15px;">🎯 <b>預估全過過關率</b>：{raw_prob:.1%}</p>
                             <hr>
-                            <h2 style="color:#10b981; margin-bottom:0;">💰 預計最高派彩：$ {payout} 元</h2>
+                            <h2 style="color:#10b981; margin-bottom:0; font-size:22px;">💰 預計最高派彩：$ {payout} 元</h2>
                         </div>
                         """, unsafe_allow_html=True)
 
@@ -365,10 +358,10 @@ if check_password("900812"):
                     elif "單場投注" in bet_mode:
                         unit_budget = round(budget / len(selected_items), 2)
                         st.markdown(f"""
-                        <div style="background-color:#1e1b4b; padding:20px; border-radius:10px; border:2px solid #818cf8;">
-                            <h3 style="color:#a5b4fc; margin-top:0;">🎯 單場獨立投注試算 (共 {len(selected_items)} 場)</h3>
-                            <p style="font-size:16px;">💵 <b>平注分配金額</b>：每場下注 $ {unit_budget} 元 (總預算 $ {budget} 元)</p>
-                            <p style="font-size:16px;">🎯 <b>單場優勢</b>：互不影響，中哪場拿哪場，風險最低！</p>
+                        <div style="background-color:#1e1b4b; padding:15px; border-radius:10px; border:2px solid #818cf8;">
+                            <h3 style="color:#a5b4fc; margin-top:0; font-size:20px;">🎯 單場獨立投注試算 (共 {len(selected_items)} 場)</h3>
+                            <p style="font-size:15px;">💵 <b>平注分配金額</b>：每場下注 $ {unit_budget} 元 (總預算 $ {budget} 元)</p>
+                            <p style="font-size:15px;">🎯 <b>單場優勢</b>：互不影響，中哪場拿哪場，風險最低！</p>
                         </div>
                         """, unsafe_allow_html=True)
 
@@ -376,7 +369,7 @@ if check_password("900812"):
                         for s_idx, item in enumerate(selected_items, 1):
                             s_payout = round(unit_budget * item['odds'], 2)
                             st.info(
-                                f"**單場 #{s_idx}**：`{item['match']}` ➔ `{item['pick']}` "
+                                f"**單場 #{s_idx}**：`{item['match']}` ➔ `{item['pick']}`\n"
                                 f"| 下注：**$ {unit_budget} 元** | 賠率：`{item['odds']}` | 命中派彩：**$ {s_payout} 元**"
                             )
                 else:
@@ -394,7 +387,7 @@ if check_password("900812"):
                         m_df = stable_df[stable_df['match'] == match_name]
                         m_time = m_df["match_time"].iloc[0]
 
-                        st.markdown(f"#### 🏆 {match_name} ｜ ⏰ 時間：{m_time}")
+                        st.markdown(f"#### 🏆 {match_name}\n⏰ 時間：{m_time}")
                         for _, r in m_df.iterrows():
                             st.success(
                                 f"👉 **穩健推薦**：【**{r['pick']}**】\n"
