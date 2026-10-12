@@ -255,8 +255,4 @@ if check_password("900812"):
                     m_time = sub_df["match_time"].iloc[0]
 
                     with st.expander(f"🏆 賽事：{m} ｜ ⏰ 開賽時間：{m_time}", expanded=True):
-                        num_cols = len(display_markets)
-                        cols = st.columns(num_cols)
-
-                        for col, m_type in zip(cols, display_markets):
-                            with col:
+                        num_cols = len
