@@ -1,348 +1,222 @@
 import datetime as dt
 import itertools
 from collections import defaultdict
+from math import prod
 
 import pandas as pd
 import requests
 import streamlit as st
 
-st.set_page_config(
-    page_title="⚡ ODD-HUNTER ｜ 雙欄即時決策 AI 體育中心",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+st.set_page_config(page_title="⚡ ODD-HUNTER", layout="wide")
 
-# ------------------------------------------------------------------
-# 常數
-# ------------------------------------------------------------------
-TEAM_NAME_MAP = {
-    "Arsenal": "阿仙奴", "Leeds United": "列斯聯", "Chelsea": "車路士",
-    "Bournemouth": "般尼茅夫", "Manchester United": "曼聯", "Tottenham Hotspur": "熱刺",
-    "Liverpool": "利物浦", "Manchester City": "曼城", "Aston Villa": "阿士東維拉",
-    "Newcastle United": "紐卡素", "West Ham United": "韋斯咸", "Fulham": "富咸",
-    "Hull City": "侯城", "Ipswich Town": "葉士域治", "Brighton": "白禮頓",
-    "Crystal Palace": "水晶宮", "Brentford": "賓福特", "Everton": "愛華頓",
-    "Coventry City": "高雲地利", "Detroit Pistons": "底特律活塞",
-    "Boston Celtics": "波士頓塞爾特人", "Real Madrid": "皇家馬德里",
-    "Barcelona": "巴塞隆拿", "Atletico Madrid": "馬德里體育會",
-    "Los Angeles Lakers": "洛杉磯湖人", "Golden State Warriors": "金州勇士",
-    "Miami Heat": "邁阿密熱火", "Brooklyn Nets": "布魯克林網",
-    "Phoenix Suns": "菲尼克斯太陽", "Los Angeles Dodgers": "洛杉磯道奇",
-    "New York Yankees": "紐約洋基", "Atlanta Braves": "亞特蘭大勇士",
-    "Houston Astros": "休士頓太空人",
+TEAMS = dict(p.split("=") for p in """Arsenal=阿仙奴;Leeds United=列斯聯;Chelsea=車路士;
+Bournemouth=般尼茅夫;Manchester United=曼聯;Tottenham Hotspur=熱刺;Liverpool=利物浦;
+Manchester City=曼城;Aston Villa=阿士東維拉;Newcastle United=紐卡素;West Ham United=韋斯咸;
+Fulham=富咸;Hull City=侯城;Ipswich Town=葉士域治;Brighton=白禮頓;Crystal Palace=水晶宮;
+Brentford=賓福特;Everton=愛華頓;Coventry City=高雲地利;Detroit Pistons=底特律活塞;
+Boston Celtics=波士頓塞爾特人;Real Madrid=皇家馬德里;Barcelona=巴塞隆拿;
+Atletico Madrid=馬德里體育會;Los Angeles Lakers=洛杉磯湖人;Golden State Warriors=金州勇士;
+Miami Heat=邁阿密熱火;Brooklyn Nets=布魯克林網;Phoenix Suns=菲尼克斯太陽;
+Los Angeles Dodgers=洛杉磯道奇;New York Yankees=紐約洋基;Atlanta Braves=亞特蘭大勇士;
+Houston Astros=休士頓太空人""".replace("\n", "").split(";"))
+
+LEAGUES = {
+    "⚽ 足球": {"英超 EPL": "soccer_epl", "西甲": "soccer_spain_la_liga",
+              "意甲": "soccer_italy_serie_a", "德甲": "soccer_germany_bundesliga",
+              "歐冠": "soccer_uefa_champs_league"},
+    "🏀 籃球": {"NBA": "basketball_nba", "歐洲聯賽": "basketball_euroleague"},
+    "⚾ 棒球": {"MLB": "baseball_mlb"},
+    "🏒 冰球": {"NHL": "icehockey_nhl"},
+    "🏈 美式足球": {"NFL": "americanfootball_nfl"},
 }
-
-SPORT_CATEGORIES = {
-    "⚽ 足球 (Soccer)": {
-        "英格蘭超級聯賽 (EPL)": "soccer_epl",
-        "西班牙甲組聯賽 (La Liga)": "soccer_spain_la_liga",
-        "義大利甲組聯賽 (Serie A)": "soccer_italy_serie_a",
-        "德國甲組聯賽 (Bundesliga)": "soccer_germany_bundesliga",
-        "歐洲冠軍聯賽 (UCL)": "soccer_uefa_champs_league",
-    },
-    "🏀 籃球 (Basketball)": {
-        "美國職業籃球 (NBA)": "basketball_nba",
-        "歐洲籃球聯賽 (EuroLeague)": "basketball_euroleague",
-    },
-    "⚾ 棒球 (Baseball)": {"美國職棒大聯盟 (MLB)": "baseball_mlb"},
-    "🏒 冰球 (Ice Hockey)": {"北美冰球聯賽 (NHL)": "icehockey_nhl"},
-    "🏈 美式足球 (NFL)": {"美國職業橄欖球聯賽 (NFL)": "americanfootball_nfl"},
-}
-
-# 注意:原本列出但沒有資料來源的玩法(波膽、角球等)已移除,
-# 否則選了也只會顯示空白。
-DEFAULT_MARKETS = ["不讓分 (獨贏)", "讓分盤", "大小分"]
-SOCCER_MARKETS = DEFAULT_MARKETS + ["雙重機會 (勝/和局)"]
-MARKETS_BY_CATEGORY = {"足球": SOCCER_MARKETS}
-
-TZ_LOCAL = dt.timezone(dt.timedelta(hours=8))
+MARKETS = ["不讓分", "讓分盤", "大小分"]
+MODES = ["🎟️ 純 N 串 1", "🛡️ 2 串 1 容錯", "🎯 單場獨立"]
+TZ = dt.timezone(dt.timedelta(hours=8))
 
 
-# ------------------------------------------------------------------
-# 登入(密碼放 .streamlit/secrets.toml)
-# ------------------------------------------------------------------
-def check_password() -> bool:
-    if st.session_state.get("password_correct"):
-        return True
-
-    _, col, _ = st.columns([1, 2, 1])
-    with col:
-        st.title("🔒 系統存取權限驗證")
-        pwd = st.text_input("請輸入訪問密碼", type="password")
-        if st.button("確認登入", use_container_width=True):
-            if pwd == st.secrets["APP_PASSWORD"]:
-                st.session_state["password_correct"] = True
-                st.rerun()
-            else:
-                st.error("❌ 密碼錯誤！請重新輸入。")
-    return False
+def cn(n):
+    return f"{TEAMS.get(n, '')} {n}".strip()
 
 
-# ------------------------------------------------------------------
-# 資料處理
-# ------------------------------------------------------------------
-def devig(prices: list[float]) -> list[float]:
-    """把含抽水的隱含機率正規化成總和為 1 的公平機率。"""
+def fair(prices):
+    """去水:隱含機率正規化為總和 1"""
     inv = [1 / p for p in prices]
-    total = sum(inv)
-    return [x / total for x in inv]
-
-
-def fmt_time(iso: str) -> str:
-    if not iso:
-        return "時間未定"
-    t = dt.datetime.fromisoformat(iso.replace("Z", "+00:00"))
-    return t.astimezone(TZ_LOCAL).strftime("%Y-%m-%d %H:%M")
-
-
-def cn(name: str) -> str:
-    c = TEAM_NAME_MAP.get(name, "")
-    return f"{c} {name}".strip()
-
-
-def consensus(match: dict, mkey: str):
-    """
-    回傳 {(name, point): {"prob": 各莊家去水後平均機率, "best": 最佳賠率}}
-    """
-    probs, best = defaultdict(list), {}
-    for bk in match.get("bookmakers", []):
-        for mk in bk.get("markets", []):
-            if mk["key"] != mkey:
-                continue
-            outs = mk["outcomes"]
-            if any(o["price"] <= 1 for o in outs):
-                continue
-            fair = devig([o["price"] for o in outs])
-            for o, p in zip(outs, fair):
-                k = (o["name"], o.get("point"))
-                probs[k].append(p)
-                best[k] = max(best.get(k, 0), o["price"])
-    return {
-        k: {"prob": sum(v) / len(v), "best": best[k]} for k, v in probs.items()
-    }
-
-
-def make_row(mid, title, time_str, mtype, pick, odds, prob):
-    return {
-        "id": f"{mid}|{mtype}|{pick}",
-        "match_id": mid,
-        "match": title,
-        "match_time": time_str,
-        "type": mtype,
-        "pick": pick,
-        "odds": round(odds, 2),
-        "win_prob": round(prob, 4),
-        "ev": round(prob * odds - 1, 3),   # 共識機率 × 最佳賠率,才有參考價值
-    }
+    s = sum(inv)
+    return [x / s for x in inv]
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def fetch_all_markets(api_key: str, sport_key: str):
+def load(key, sport):
     try:
         r = requests.get(
-            f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/",
-            params={
-                "apiKey": api_key, "regions": "eu",
-                "markets": "h2h,spreads,totals", "oddsFormat": "decimal",
-            },
-            timeout=10,
-        )
+            f"https://api.the-odds-api.com/v4/sports/{sport}/odds/",
+            params=dict(apiKey=key, regions="eu", markets="h2h,spreads,totals",
+                        oddsFormat="decimal"), timeout=10)
         r.raise_for_status()
         data = r.json()
-    except requests.HTTPError as e:
-        return None, f"API 連線失敗 (代碼 {e.response.status_code})"
     except requests.RequestException as e:
-        return None, f"連線異常: {type(e).__name__}"
-
+        return None, f"連線失敗：{type(e).__name__}"
     if not data:
-        return None, "目前該聯賽暫無即時開盤數據。"
+        return None, "目前暫無開盤數據"
 
     rows = []
     for m in data:
-        mid = m["id"]
-        home, away = m.get("home_team", ""), m.get("away_team", "")
-        title = f"{cn(home)} (主) vs {cn(away)} (客)"
-        t = fmt_time(m.get("commence_time", ""))
-        add = lambda *a: rows.append(make_row(mid, title, t, *a))
+        home, mid = m["home_team"], m["id"]
+        title = f"{cn(home)} (主) vs {cn(m['away_team'])} (客)"
+        t = dt.datetime.fromisoformat(m["commence_time"].replace("Z", "+00:00"))
+        t = t.astimezone(TZ).strftime("%m-%d %H:%M")
 
-        # 不讓分 + 雙重機會
-        h2h = consensus(m, "h2h")
-        draw = h2h.get(("Draw", None))
-        for (name, _), v in h2h.items():
-            if name == "Draw":
-                add("不讓分 (獨贏)", "全場和局 (Draw)", v["best"], v["prob"])
-                continue
-            side = "主" if name == home else "客"
-            add("不讓分 (獨贏)", f"{cn(name)} 不讓分勝 ({side})", v["best"], v["prob"])
-            if draw:
-                p_dc = v["prob"] + draw["prob"]
-                # 雙重機會賠率:公平機率 × 約 5% 抽水的保守估計
-                add("雙重機會 (勝/和局)", f"🛡️ {cn(name)} 勝或和局",
-                    0.95 / p_dc, p_dc)
+        # 多家莊家:平均去水機率 + 最佳賠率
+        agg = defaultdict(lambda: [[], 0.0])
+        for bk in m["bookmakers"]:
+            for mk in bk["markets"]:
+                outs = mk["outcomes"]
+                if any(o["price"] <= 1 for o in outs):
+                    continue
+                for o, p in zip(outs, fair([o["price"] for o in outs])):
+                    a = agg[(mk["key"], o["name"], o.get("point"))]
+                    a[0].append(p)
+                    a[1] = max(a[1], o["price"])
+        res = {k: (sum(v[0]) / len(v[0]), v[1]) for k, v in agg.items()}
+        draw = res.get(("h2h", "Draw", None), (0, 0))[0]
 
-        # 讓分
-        for (name, pt), v in consensus(m, "spreads").items():
-            pt = pt or 0
-            add("讓分盤", f"{cn(name)} 讓分 ({pt:+g})", v["best"], v["prob"])
+        def add(typ, pick, odds, p):
+            rows.append((f"{mid}|{typ}|{pick}", mid, title, t, typ, pick,
+                         round(odds, 2), round(p, 4), round(p * odds - 1, 3),
+                         cn(home), cn(m["away_team"])))
 
-        # 大小分
-        for (name, pt), v in consensus(m, "totals").items():
-            label = "大分 Over" if name.lower() == "over" else "小分 Under"
-            add("大小分", f"全場大小分：{label} ({pt})", v["best"], v["prob"])
+        for (mk, name, pt), (p, o) in res.items():
+            if mk == "h2h":
+                if name == "Draw":
+                    add("不讓分", "全場和局", o, p)
+                else:
+                    add("不讓分", f"{cn(name)} 勝 ({'主' if name == home else '客'})", o, p)
+                    if draw:  # 雙重機會(估算賠率,以莊家實際為準)
+                        add("雙重機會", f"🛡️ {cn(name)} 勝或和", 0.95 / (p + draw), p + draw)
+            elif mk == "spreads":
+                add("讓分盤", f"{cn(name)} 讓分 ({(pt or 0):+g})", o, p)
+            else:
+                add("大小分", f"{'大' if name == 'Over' else '小'}分 {pt}", o, p)
 
-    return pd.DataFrame(rows), None
-
-
-# ------------------------------------------------------------------
-# 試算
-# ------------------------------------------------------------------
-def card(color, title_color, title, body):
-    st.markdown(
-        f"""<div style="background:#0f172a;padding:18px;border-radius:12px;
-        border:2px solid {color};"><h3 style="color:{title_color};margin-top:0;
-        font-size:20px;">{title}</h3>{body}</div>""",
-        unsafe_allow_html=True,
-    )
+    cols = "id match_id match time type pick odds prob ev home away".split()
+    return pd.DataFrame(rows, columns=cols), None
 
 
-def render_betslip(items, bet_mode, budget):
-    st.write(f"已選擇 **{len(items)}** 個選項：")
-    for it in items:
-        st.success(
-            f"📌 **{it['match']}** (`{it['match_time']}`)\n"
-            f"➔ **{it['pick']}** (賠率 {it['odds']} | 機率 {it['win_prob']:.0%})"
-        )
-    st.markdown("---")
-
-    if "純 N 串 1" in bet_mode:
-        if len({it["match_id"] for it in items}) < len(items):
-            st.warning("⚠️ 同一場比賽的選項彼此相關,多數莊家不允許串在一起。")
-        odds = prob = 1.0
-        for it in items:
-            odds *= it["odds"]
-            prob *= it["win_prob"]
-        card("#3b82f6", "#60a5fa", f"🎟️ 純 {len(items)} 串 1 試算", f"""
-            <p>💵 總投注：$ {budget}</p>
-            <p>⚡ 總賠率：<b style="color:#f59e0b">{odds:.2f} 倍</b></p>
-            <p>🎯 估算全過機率：<b style="color:#ef4444">{prob:.1%}</b></p>
-            <hr style="border-color:#334155">
-            <h2 style="color:#10b981;margin:0">💰 最高派彩：$ {budget * odds:,.2f}</h2>""")
-
-    elif "容錯組合" in bet_mode:
-        if len(items) < 2:
-            st.warning("💡 容錯組合模式需要至少勾選 2 個選項！")
-            return
-        combos = list(itertools.combinations(items, 2))
-        unit = budget / len(combos)
-        card("#10b981", "#10b981", f"🛡️ 2 串 1 組合 ({len(combos)} 組)",
-             f"<p>💵 每組 $ {unit:.2f}(總預算 $ {budget})</p>")
-        for i, (a, b) in enumerate(combos, 1):
-            o, p = a["odds"] * b["odds"], a["win_prob"] * b["win_prob"]
-            st.info(f"**組合 #{i}**：`{a['pick']}` + `{b['pick']}`\n"
-                    f"➔ 賠率 {o:.2f} | 過關率 {p:.1%} | 派彩 $ {unit * o:,.2f}")
-
-    else:
-        unit = budget / len(items)
-        card("#818cf8", "#a5b4fc", f"🎯 單場獨立投注 (共 {len(items)} 場)",
-             f"<p>💵 每場 $ {unit:.2f}(總預算 $ {budget})</p>")
-        for i, it in enumerate(items, 1):
-            st.info(f"**單場 #{i}**：`{it['match']}`\n"
-                    f"➔ `{it['pick']}` | 機率 {it['win_prob']:.0%} | "
-                    f"賠率 {it['odds']} | 派彩 $ {unit * it['odds']:,.2f}")
+def pick_card(df, league):
+    """今日首選卡片:不讓分中、共識機率最高(賠率 ≥ 1.3)的選項"""
+    c = df[(df.type == "不讓分") & (df.odds >= 1.3) & ~df.pick.str.contains("和局")]
+    if c.empty:
+        return
+    r = c.loc[c.prob.idxmax()]
+    st.markdown(f"""
+<div style="background:#0f172a;border:1px solid #1e3a34;border-radius:18px;padding:18px;margin-bottom:12px">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <b style="color:#fbbf24;font-size:18px">👑 今日 AI 首選</b>
+    <span style="background:#064e3b;color:#34d399;padding:4px 10px;border-radius:99px;font-size:12px">● 即時盤口</span>
+  </div>
+  <div style="margin:12px 0 8px">
+    <span style="background:#422006;color:#fbbf24;padding:3px 10px;border-radius:99px;font-size:12px">⭐ 每日一推</span>
+    <span style="background:#052e2b;color:#34d399;padding:3px 10px;border-radius:99px;font-size:12px">{r.type}</span>
+  </div>
+  <div style="color:#94a3b8;font-size:13px">{league} · {r.time}</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0;color:#f1f5f9;font-size:17px;font-weight:700">
+    <div style="flex:1"><small style="color:#94a3b8;font-weight:400">客場</small><br>{r.away}</div>
+    <div style="color:#64748b;padding:0 8px">VS</div>
+    <div style="flex:1;text-align:right"><small style="color:#94a3b8;font-weight:400">主場</small><br>{r.home}</div>
+  </div>
+  <hr style="border-color:#1e293b">
+  <div style="color:#94a3b8;font-size:13px">AI 推薦(獨贏)</div>
+  <div style="color:#34d399;font-size:18px;font-weight:700;margin:4px 0 12px">{r.pick}</div>
+  <div style="display:flex;gap:24px">
+    <div><small style="color:#94a3b8">賠率</small><br><b style="color:#f1f5f9;font-size:22px">{r.odds}</b></div>
+    <div style="flex:1"><small style="color:#94a3b8">共識機率</small><br>
+      <b style="color:#f1f5f9;font-size:22px">{r.prob:.0%}</b>
+      <div style="background:#1e293b;border-radius:99px;height:6px;margin-top:6px">
+        <div style="width:{r.prob * 100:.0f}%;height:6px;border-radius:99px;background:linear-gradient(90deg,#34d399,#38bdf8)"></div>
+      </div></div>
+  </div>
+</div>""", unsafe_allow_html=True)
 
 
-# ------------------------------------------------------------------
-# 主程式
-# ------------------------------------------------------------------
-if not check_password():
-    st.stop()
+def betslip(items, mode, budget):
+    st.write(f"已選 **{len(items)}** 項")
+    tickets = [[tuple(items)], list(itertools.combinations(items, 2)),
+               [(i,) for i in items]][MODES.index(mode)]
+    if not tickets:
+        return st.warning("容錯模式需至少勾選 2 項")
+    if mode == MODES[0] and len({i["match_id"] for i in items}) < len(items):
+        st.warning("⚠️ 同場選項相關,多數莊家不允許串關")
+    unit = budget / len(tickets)
+    st.markdown(f"**{mode}**:{len(tickets)} 張 × $ {unit:.2f}(總 $ {budget})")
+    for n, tk in enumerate(tickets, 1):
+        o, p = prod(i["odds"] for i in tk), prod(i["prob"] for i in tk)
+        st.info(f"**#{n}** " + " + ".join(f"`{i['pick']}`" for i in tk) +
+                f"\n\n賠率 **{o:.2f}** ｜ 過關率 **{p:.1%}** ｜ 派彩 **${unit * o:,.2f}**")
 
-st.sidebar.success("✅ 權限驗證通過")
-if st.sidebar.button("🔒 登出系統", use_container_width=True):
-    st.session_state["password_correct"] = False
-    st.rerun()
 
-st.title("⚡ ODD-HUNTER ｜ 雙欄即時決策 AI 體育中心")
-st.caption("🛡️ 左側選單盤口 ｜ 📊 右側即時注單與過關率試算")
-
-st.sidebar.header("⚙️ 賽事與策略設定")
-category = st.sidebar.selectbox("1. 選擇體育項目", list(SPORT_CATEGORIES))
-leagues = SPORT_CATEGORIES[category]
-league_name = st.sidebar.selectbox("2. 選擇特定聯賽", list(leagues))
-sport_key = leagues[league_name]
-
-bet_mode = st.sidebar.radio("3. 選擇下注模式", [
-    "🎟️ 純 N 串 1 過關 (高賠率)",
-    "🛡️ 系統 2 串 1 容錯組合 (穩健避險)",
-    "🎯 單場獨立投注 (最高命中率)",
-])
-min_prob = st.sidebar.slider("4. 🎯 機率門檻過濾 (%)", 40, 90, 50, 5)
-
-market_options = next(
-    (v for k, v in MARKETS_BY_CATEGORY.items() if k in category), DEFAULT_MARKETS
-)
-chosen = st.sidebar.multiselect("5. 選擇顯示玩法 (未選則全顯示)", market_options)
-display_markets = chosen or market_options
-budget = st.sidebar.number_input("總投注資金 ($)", min_value=10, value=100, step=10)
-
-if st.sidebar.button("🔄 刷新盤口數據", use_container_width=True):
-    fetch_all_markets.clear()      # 只清這個函式的快取
-    st.rerun()
-
-with st.spinner(f"📡 抓取 【{league_name}】 數據中..."):
-    df_all, err = fetch_all_markets(st.secrets["ODDS_API_KEY"], sport_key)
-
-if err:
-    st.error(f"❌ 數據載入失敗：{err}")
-    st.stop()
-
-df = df_all[
-    df_all["win_prob"].ge(min_prob / 100) & df_all["type"].isin(display_markets)
-]
-
-tab1, tab2 = st.tabs(["📋 自由勾選與即時注單", "🔥 高機率選項"])
-
-with tab1:
+@st.fragment  # 勾選只重繪此區塊,不會重跑整頁
+def board(df, mode, budget):
     left, right = st.columns([7, 5])
-    selected = []
-
+    sel = []
     with left:
-        st.subheader(f"🌐 【{league_name}】 盤口列表")
-        st.caption(f"機率門檻 ≥ {min_prob}% ｜ 模式：**{bet_mode}**")
-
         if df.empty:
-            st.warning(f"目前無機率 ≥ {min_prob}% 的選項,請調整門檻。")
-        else:
-            for _, m_df in df.groupby("match_id", sort=False):
-                first = m_df.iloc[0]
-                with st.expander(f"🏆 {first['match']}\n⏰ 開賽時間：{first['match_time']}",
-                                 expanded=True):
-                    for m_type, t_df in m_df.groupby("type", sort=False):
-                        st.markdown(f"**【{m_type}】**")
-                        for row in t_df.to_dict("records"):
-                            label = (f"{row['pick']} | 賠率 {row['odds']} "
-                                     f"(機率 {row['win_prob']:.0%})")
-                            if st.checkbox(label, key=f"chk_{row['id']}"):
-                                selected.append(row)
-                        st.markdown("---")
-
+            st.warning("無符合條件的選項")
+        for _, g in df.groupby("match_id", sort=False):
+            f = g.iloc[0]
+            with st.expander(f"🏆 {f.match}  ⏰ {f.time}", expanded=True):
+                for typ, tg in g.groupby("type", sort=False):
+                    st.markdown(f"**【{typ}】**")
+                    for r in tg.to_dict("records"):
+                        if st.checkbox(f"{r['pick']} | {r['odds']} ({r['prob']:.0%})",
+                                       key=r["id"]):
+                            sel.append(r)
     with right:
-        st.subheader("🧾 你的自選投注單試算")
-        if selected:
-            render_betslip(selected, bet_mode, budget)
-        else:
-            st.info("👈 請在左側勾選比賽,右側將即時試算。")
+        st.subheader("🧾 投注單試算")
+        betslip(sel, mode, budget) if sel else st.info("👈 勾選選項開始試算")
 
-with tab2:
-    st.subheader("🔥 高機率選項(機率 ≥ 70%)")
-    st.caption("機率為多家莊家去水後的共識機率。高機率不等於高價值:賠率通常很低。")
-    top = df_all[df_all["win_prob"] >= 0.70]
-    if top.empty:
-        st.info("目前暫無機率 ≥ 70% 的選項。")
-    else:
-        for _, m_df in top.groupby("match_id", sort=False):
-            first = m_df.iloc[0]
-            st.markdown(f"#### 🏆 {first['match']}\n⏰ {first['match_time']}")
-            for r in m_df.to_dict("records"):
-                st.success(f"👉 **{r['pick']}**\n\n賠率 `{r['odds']}` ｜ "
-                           f"共識機率 `{r['win_prob']:.1%}` ｜ EV `{r['ev']:+.3f}`")
+
+# ---------------------------- 主程式 ----------------------------
+if not st.session_state.get("ok"):
+    _, c, _ = st.columns([1, 2, 1])
+    with c:
+        st.title("🔒 登入")
+        pwd = st.text_input("密碼", type="password")
+        if st.button("登入", use_container_width=True):
+            if pwd == st.secrets["APP_PASSWORD"]:
+                st.session_state.ok = True
+                st.rerun()
+            st.error("密碼錯誤")
+    st.stop()
+
+sb = st.sidebar
+if sb.button("🔒 登出", use_container_width=True):
+    st.session_state.ok = False
+    st.rerun()
+cat = sb.selectbox("體育項目", LEAGUES)
+league = sb.selectbox("聯賽", LEAGUES[cat])
+mode = sb.radio("下注模式", MODES)
+min_p = sb.slider("機率門檻 (%)", 40, 90, 50, 5) / 100
+opts = MARKETS + (["雙重機會"] if "足球" in cat else [])
+shown = sb.multiselect("顯示玩法(空=全部)", opts) or opts
+budget = sb.number_input("總資金 ($)", 10, value=100, step=10)
+if sb.button("🔄 刷新", use_container_width=True):
+    load.clear()
+    st.rerun()
+
+st.title("⚡ ODD-HUNTER")
+with st.spinner("抓取數據中..."):
+    df_all, err = load(st.secrets["ODDS_API_KEY"], LEAGUES[cat][league])
+if err:
+    st.error(err)
+    st.stop()
+
+pick_card(df_all, league)
+t1, t2 = st.tabs(["📋 盤口與注單", "🔥 高機率選項"])
+with t1:
+    board(df_all[(df_all.prob >= min_p) & df_all.type.isin(shown)], mode, budget)
+with t2:
+    st.caption("機率為多家莊家去水後共識;高機率通常賠率很低,不等於高價值。")
+    for _, g in df_all[df_all.prob >= 0.7].groupby("match_id", sort=False):
+        st.markdown(f"#### 🏆 {g.iloc[0].match} ⏰ {g.iloc[0].time}")
+        for r in g.itertuples():
+            st.success(f"**{r.pick}** ｜ 賠率 `{r.odds}` ｜ 機率 `{r.prob:.1%}` ｜ EV `{r.ev:+.3f}`")
