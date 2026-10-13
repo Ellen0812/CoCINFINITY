@@ -38,6 +38,10 @@ def cn(n):
     return f"{TEAMS.get(n, '')} {n}".strip()
 
 
+def sn(n):
+    return TEAMS.get(n, n)
+
+
 def fair(prices):
     """去水:隱含機率正規化為總和 1"""
     inv = [1 / p for p in prices]
@@ -80,25 +84,31 @@ def load(key, sport):
         res = {k: (sum(v[0]) / len(v[0]), v[1]) for k, v in agg.items()}
         draw = res.get(("h2h", "Draw", None), (0, 0))[0]
 
-        def add(typ, pick, odds, p):
+        def add(typ, pick, odds, p, label):
             rows.append((f"{mid}|{typ}|{pick}", mid, title, t, typ, pick,
                          round(odds, 2), round(p, 4), round(p * odds - 1, 3),
-                         cn(home), cn(m["away_team"])))
+                         cn(home), cn(m["away_team"]), label,
+                         sn(home), sn(m["away_team"])))
 
         for (mk, name, pt), (p, o) in res.items():
             if mk == "h2h":
                 if name == "Draw":
-                    add("不讓分", "全場和局", o, p)
+                    add("不讓分", "全場和局", o, p, "和局")
                 else:
-                    add("不讓分", f"{cn(name)} 勝 ({'主' if name == home else '客'})", o, p)
+                    add("不讓分", f"{cn(name)} 勝 ({'主' if name == home else '客'})",
+                        o, p, f"{sn(name)} 獨贏")
                     if draw:  # 雙重機會(估算賠率,以莊家實際為準)
-                        add("雙重機會", f"🛡️ {cn(name)} 勝或和", 0.95 / (p + draw), p + draw)
+                        add("雙重機會", f"🛡️ {cn(name)} 勝或和", 0.95 / (p + draw),
+                            p + draw, f"{sn(name)} 不敗")
             elif mk == "spreads":
-                add("讓分盤", f"{cn(name)} 讓分 ({(pt or 0):+g})", o, p)
+                pt = pt or 0
+                add("讓分盤", f"{cn(name)} 讓分 ({pt:+g})", o, p,
+                    f"{sn(name)} {'受讓' if pt > 0 else '讓'} {pt:+g}")
             else:
-                add("大小分", f"{'大' if name == 'Over' else '小'}分 {pt}", o, p)
+                add("大小分", f"{'大' if name == 'Over' else '小'}分 {pt}", o, p,
+                    f"{'大' if name == 'Over' else '小'}分 {pt}")
 
-    cols = "id match_id match time type pick odds prob ev home away".split()
+    cols = "id match_id match time type pick odds prob ev home away label hs aws".split()
     return pd.DataFrame(rows, columns=cols), None
 
 
@@ -175,6 +185,27 @@ def board(df, mode, budget):
         betslip(sel, mode, budget) if sel else st.info("👈 勾選選項開始試算")
 
 
+def ai_list(df):
+    """每場挑一個共識機率最高的獨贏/讓分選項,以金色標籤列出"""
+    c = df[df.type.isin(["不讓分", "讓分盤"]) & (df.label != "和局")]
+    if c.empty:
+        return st.info("暫無資料")
+    top = c.loc[c.groupby("match_id").prob.idxmax()].sort_values("time")
+    html = "".join(
+        '<div style="display:flex;align-items:center;gap:10px;padding:14px 10px;'
+        'border-bottom:1px solid #1e293b">'
+        f'<div style="flex:1;color:#94a3b8;font-size:12px">{r.time}<br>'
+        f'<span style="color:#f1f5f9;font-size:15px">{r.aws} vs {r.hs}</span></div>'
+        '<span style="background:linear-gradient(#fcd34d,#f59e0b);color:#451a03;'
+        f'font-weight:800;padding:8px 14px;border-radius:12px;white-space:nowrap">{r.label}</span>'
+        f'<small style="color:#94a3b8;min-width:32px">{r.prob:.0%}</small></div>'
+        for r in top.itertuples()
+    )
+    st.caption("AI 推薦:每場取共識機率最高的獨贏或讓分選項(客 vs 主)")
+    st.markdown(f'<div style="background:#0b0f19;border-radius:14px">{html}</div>',
+                unsafe_allow_html=True)
+
+
 # ---------------------------- 主程式 ----------------------------
 if not st.session_state.get("ok"):
     _, c, _ = st.columns([1, 2, 1])
@@ -211,7 +242,9 @@ if err:
     st.stop()
 
 pick_card(df_all, league)
-t1, t2 = st.tabs(["📋 盤口與注單", "🔥 高機率選項"])
+t1, t3, t2 = st.tabs(["📋 盤口與注單", "🤖 AI 推薦", "🔥 高機率選項"])
+with t3:
+    ai_list(df_all)
 with t1:
     board(df_all[(df_all.prob >= min_p) & df_all.type.isin(shown)], mode, budget)
 with t2:
