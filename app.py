@@ -1,5 +1,6 @@
 import datetime as dt
 import itertools
+import os
 from collections import defaultdict
 from math import prod
 
@@ -112,12 +113,82 @@ def load(key, sport):
     return pd.DataFrame(rows, columns=cols), None
 
 
-def pick_card(df, league):
+LOG = "pick_log.csv"  # 注意:Streamlit Cloud 重啟後會重置,長期保存請改用外部資料庫
+LOG_COLS = "match_id time league pick side odds prob sport result".split()
+
+
+def load_log():
+    if os.path.exists(LOG):
+        return pd.read_csv(LOG, dtype={"result": str}).fillna({"result": ""})
+    return pd.DataFrame(columns=LOG_COLS)
+
+
+def log_pick(r, league, sport):
+    """每場比賽只記錄一次首選(開賽前記錄,不事後修改)"""
+    log = load_log()
+    if r.match_id in set(log.match_id):
+        return
+    row = dict(match_id=r.match_id, time=r.time, league=league, pick=r.pick,
+               side="主" if r.pick.endswith("(主)") else "客",
+               odds=r.odds, prob=r.prob, sport=sport, result="")
+    pd.concat([log, pd.DataFrame([row])]).to_csv(LOG, index=False)
+
+
+def settle(key):
+    """用 API 比分結算(僅限近 3 天完賽;平手視為獨贏輸)。按鈕觸發以節省額度"""
+    log = load_log()
+    for sport in log[log.result == ""].sport.unique():
+        try:
+            r = requests.get(f"https://api.the-odds-api.com/v4/sports/{sport}/scores/",
+                             params=dict(apiKey=key, daysFrom=3), timeout=10)
+            r.raise_for_status()
+        except requests.RequestException:
+            continue
+        done = {e["id"]: e for e in r.json() if e.get("completed") and e.get("scores")}
+        for i, p in log[(log.result == "") & (log.sport == sport)].iterrows():
+            e = done.get(p.match_id)
+            if not e:
+                continue
+            sc = {s["name"]: float(s["score"]) for s in e["scores"]}
+            h, a = sc.get(e["home_team"]), sc.get(e["away_team"])
+            if h is None or a is None:
+                continue
+            win = h > a if p.side == "主" else a > h
+            log.loc[i, "result"] = "贏" if win else "輸"
+    log.to_csv(LOG, index=False)
+
+
+def track_panel(key):
+    log = load_log()
+    done = log[log.result.isin(["贏", "輸"])]
+    n = len(done)
+    wins = (done.result == "贏").sum()
+    roi = ((done.odds - 1).where(done.result == "贏", -1)).mean() if n else None
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("已記錄推薦", len(log))
+    c2.metric("已結算", n)
+    c3.metric("命中率", f"{wins / n:.0%}" if n else "—")
+    c4.metric("平注報酬率", f"{roi:+.1%}" if n else "—")
+    st.caption("所有數字均由本站實際記錄與賽果計算,非預測保證。"
+               + (" ⚠️ 樣本數低於 30,數字參考價值有限。" if n < 30 else ""))
+    b1, b2 = st.columns(2)
+    if b1.button("🔄 更新賽果", use_container_width=True):
+        settle(key)
+        st.rerun()
+    b2.download_button("⬇️ 下載完整紀錄 (CSV)", log.to_csv(index=False).encode("utf-8-sig"),
+                       "pick_log.csv", use_container_width=True)
+    if not log.empty:
+        st.dataframe(log.iloc[::-1].head(30), use_container_width=True, hide_index=True)
+
+
+def pick_card(df, league, sport=None):
     """今日首選卡片:不讓分中、共識機率最高(賠率 ≥ 1.3)的選項"""
     c = df[(df.type == "不讓分") & (df.odds >= 1.3) & ~df.pick.str.contains("和局")]
     if c.empty:
         return
     r = c.loc[c.prob.idxmax()]
+    if sport:
+        log_pick(r, league, sport)
     st.markdown(f"""
 <div style="background:#0f172a;border:1px solid #1e3a34;border-radius:18px;padding:18px;margin-bottom:12px">
   <div style="display:flex;justify-content:space-between;align-items:center">
@@ -241,10 +312,12 @@ if err:
     st.error(err)
     st.stop()
 
-pick_card(df_all, league)
-t1, t3, t2 = st.tabs(["📋 盤口與注單", "🤖 AI 推薦", "🔥 高機率選項"])
+pick_card(df_all, league, LEAGUES[cat][league])
+t1, t3, t2, t4 = st.tabs(["📋 盤口與注單", "🤖 AI 推薦", "🔥 高機率選項", "📊 公開戰績"])
 with t3:
     ai_list(df_all)
+with t4:
+    track_panel(st.secrets["ODDS_API_KEY"])
 with t1:
     board(df_all[(df_all.prob >= min_p) & df_all.type.isin(shown)], mode, budget)
 with t2:
