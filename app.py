@@ -1,5 +1,6 @@
 import datetime as dt
 import itertools
+import math
 import os
 from collections import defaultdict
 from math import prod
@@ -277,6 +278,114 @@ def ai_list(df):
                 unsafe_allow_html=True)
 
 
+def wilson(w, n, z=1.96):
+    """命中率的 95% Wilson 信賴區間"""
+    if n == 0:
+        return 0.0, 0.0
+    p, d = w / n, 1 + z * z / n
+    c = (p + z * z / (2 * n)) / d
+    h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
+    return c - h, c + h
+
+
+def stats_tab(df):
+    # ---------- 1. 定義問題 ----------
+    st.header("1️⃣ 定義問題")
+    st.markdown("""
+**研究目的**:檢驗本站「機率與推薦」的資料品質與實際表現。
+
+- **Q1** 各玩法的機率、賠率、EV 分布為何?(描述統計)
+- **Q2** 莊家抽水(總隱含機率超出 100% 的部分)有多大?
+- **Q3** 首選推薦的實際命中率,是否與預測機率一致?(校準度)
+- **Q4** 照首選平注下注,長期報酬率為何?
+
+**變數**:預測機率 `prob`(多家莊家去水後平均)、賠率 `odds`、期望值 `EV = prob × odds − 1`、賽果(贏/輸)。
+""")
+
+    # ---------- 2. 收集資料 ----------
+    st.header("2️⃣ 收集資料")
+    log = load_log()
+    done = log[log.result.isin(["贏", "輸"])].copy()
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("盤口選項數", len(df))
+    c2.metric("比賽場次", df.match_id.nunique())
+    c3.metric("推薦紀錄", len(log))
+    c4.metric("已結算", len(done))
+    st.caption("資料來源:The Odds API(目前所選聯賽的即時盤口)與本站 `pick_log.csv` 推薦紀錄。")
+
+    # ---------- 3. 整理與計算 ----------
+    st.header("3️⃣ 整理與計算")
+    st.subheader("Q1 各玩法描述統計")
+    desc = df.groupby("type").agg(
+        筆數=("prob", "size"), 平均機率=("prob", "mean"), 機率標準差=("prob", "std"),
+        平均賠率=("odds", "mean"), 平均EV=("ev", "mean"),
+        正EV比例=("ev", lambda s: (s > 0).mean()),
+    ).round(3)
+    st.dataframe(desc, use_container_width=True)
+    st.download_button("⬇️ 下載描述統計 (CSV)", desc.to_csv().encode("utf-8-sig"),
+                       "descriptive_stats.csv")
+
+    st.subheader("Q2 莊家抽水")
+    ml = df[df.type == "不讓分"].groupby("match_id").odds.agg(lambda s: (1 / s).sum())
+    ml = ml[ml > 0]
+    if len(ml):
+        st.metric("獨贏盤平均總隱含機率", f"{ml.mean():.1%}",
+                  f"抽水約 {ml.mean() - 1:+.1%}", delta_color="off")
+        st.caption("以各選項最佳賠率計算;超過 100% 的部分即莊家優勢,低於 100% 代表跨莊有套利空間。")
+
+    st.subheader("Q3、Q4 首選推薦實際表現")
+    n = len(done)
+    if n == 0:
+        st.info("尚無已結算資料。請先累積推薦紀錄,並在「公開戰績」分頁按「更新賽果」。")
+    else:
+        done["win"] = (done.result == "贏").astype(int)
+        w = int(done.win.sum())
+        lo, hi = wilson(w, n)
+        exp = done.prob.sum()
+        var = (done.prob * (1 - done.prob)).sum()
+        z = (w - exp) / math.sqrt(var) if var else 0.0
+        pval = math.erfc(abs(z) / math.sqrt(2))
+        brier = ((done.prob - done.win) ** 2).mean()
+        roi = (done.odds - 1).where(done.win == 1, -1).mean()
+        m = st.columns(4)
+        m[0].metric("命中率", f"{w / n:.1%}", f"95% CI {lo:.0%}–{hi:.0%}", delta_color="off")
+        m[1].metric("預期命中率", f"{exp / n:.1%}")
+        m[2].metric("Brier 分數", f"{brier:.3f}", help="越低越準;永遠猜 50% 為 0.25")
+        m[3].metric("平注報酬率", f"{roi:+.1%}")
+
+        done["區間"] = pd.cut(done.prob, [0, .5, .6, .7, .8, 1.0])
+        cal = done.groupby("區間", observed=True).agg(
+            場次=("win", "size"), 預測機率=("prob", "mean"), 實際命中率=("win", "mean")).round(3)
+        cal.index = cal.index.astype(str)
+
+    # ---------- 4. 分析與呈現 ----------
+    st.header("4️⃣ 分析與呈現")
+    st.subheader("EV 分布")
+    h = pd.cut(df.ev, 10).value_counts().sort_index()
+    h.index = h.index.astype(str)
+    st.bar_chart(h)
+
+    if n:
+        st.subheader("校準圖:預測機率 vs 實際命中率")
+        st.bar_chart(cal[["預測機率", "實際命中率"]])
+        st.dataframe(cal, use_container_width=True)
+
+    st.subheader("結論")
+    pos = (df.ev > 0).mean()
+    st.markdown(f"- **Q1**:{pos:.0%} 的選項 EV > 0;共識機率與最佳賠率的差距造成少數正 EV。")
+    if len(ml):
+        st.markdown(f"- **Q2**:獨贏盤平均抽水約 {ml.mean() - 1:+.1%},長期下注需先克服這個成本。")
+    if n < 30:
+        st.markdown(f"- **Q3、Q4**:目前僅 {n} 場已結算,**樣本不足(建議 ≥ 30,最好 ≥ 100)**,不下結論。")
+    else:
+        verdict = ("與預期**有顯著差異**" if pval < 0.05 else "與預期**無顯著差異**")
+        st.markdown(f"- **Q3**:實際命中 {w / n:.1%} vs 預期 {exp / n:.1%},z = {z:.2f},"
+                    f"p = {pval:.3f},{verdict}(α = 0.05)。")
+        st.markdown(f"- **Q4**:平注報酬率 {roi:+.1%};請對照信賴區間,短期結果變動很大。")
+    st.caption("限制:機率來自市場共識而非獨立模型;首選為規則挑選,有選擇偏誤;"
+               "常態近似與 Wilson 區間在小樣本下較不準;過去表現不代表未來。")
+
+
 # ---------------------------- 主程式 ----------------------------
 if not st.session_state.get("ok"):
     _, c, _ = st.columns([1, 2, 1])
@@ -313,11 +422,14 @@ if err:
     st.stop()
 
 pick_card(df_all, league, LEAGUES[cat][league])
-t1, t3, t2, t4 = st.tabs(["📋 盤口與注單", "🤖 AI 推薦", "🔥 高機率選項", "📊 公開戰績"])
+t1, t3, t2, t4, t5 = st.tabs(
+    ["📋 盤口與注單", "🤖 AI 推薦", "🔥 高機率選項", "📊 公開戰績", "🧮 統計分析"])
 with t3:
     ai_list(df_all)
 with t4:
     track_panel(st.secrets["ODDS_API_KEY"])
+with t5:
+    stats_tab(df_all)
 with t1:
     board(df_all[(df_all.prob >= min_p) & df_all.type.isin(shown)], mode, budget)
 with t2:
