@@ -11,6 +11,10 @@ import streamlit as st
 
 st.set_page_config(page_title="⚡ ODD-HUNTER", layout="wide")
 
+# 初始化全域勾選清單 (Session State)，實現跨聯賽混合選擇
+if "cart" not in st.session_state:
+    st.session_state.cart = {}
+
 TEAMS = dict(p.split("=") for p in """Arsenal=阿仙奴;Leeds United=列斯聯;Chelsea=車路士;
 Bournemouth=般尼茅夫;Manchester United=曼聯;Tottenham Hotspur=熱刺;Liverpool=利物浦;
 Manchester City=曼城;Aston Villa=阿士東維拉;Newcastle United=紐卡素;West Ham United=韋斯咸;
@@ -48,15 +52,11 @@ def sn(n):
 
 
 def fair(prices):
-    """去水:隱含機率正規化為總和 1"""
     inv = [1 / p for p in prices]
     s = sum(inv)
     return [x / s for x in inv]
 
 
-# -------------------------------------------------------------------
-# 中華職棒 (CPBL) 本地預設開盤資料庫
-# -------------------------------------------------------------------
 def load_cpbl_mock():
     rows = [
         ("cpbl1|不讓分|中信兄弟 勝 (主)", "cpbl1", "中信兄弟 (主) vs 統一7-ELEVEn獅 (客)", "18:35", "不讓分", "中信兄弟 勝 (主)", 1.75, 0.54, 0.05, "中信兄弟", "統一7-ELEVEn獅", "中信兄弟 獨贏", "中信兄弟", "統一7-ELEVEn獅"),
@@ -214,7 +214,14 @@ def pick_card(df, league):
 
 
 def betslip(items, mode, budget):
-    st.write(f"已選 **{len(items)}** 項")
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        st.write(f"已跨聯賽挑選 **{len(items)}** 項")
+    with c2:
+        if st.button("🗑️ 清空注單", key="clear_cart_btn"):
+            st.session_state.cart.clear()
+            st.rerun()
+
     tickets = [[tuple(items)], list(itertools.combinations(items, 2)),
                [(i,) for i in items]][MODES.index(mode)]
     if not tickets:
@@ -232,7 +239,7 @@ def betslip(items, mode, budget):
 @st.fragment
 def board(df, mode, budget):
     left, right = st.columns([7, 5])
-    sel = []
+    
     with left:
         if df.empty:
             st.warning("無符合條件的選項")
@@ -243,15 +250,30 @@ def board(df, mode, budget):
                     st.markdown(f"**【{typ}】**")
                     for idx, r in enumerate(tg.to_dict("records")):
                         unique_key = f"{r['id']}_{idx}"
-                        if st.checkbox(f"{r['pick']} | {r['odds']} ({r['prob']:.0%})",
-                                       key=unique_key):
-                            sel.append(r)
+                        
+                        # 檢查全域 Session Cart 狀態
+                        is_checked = unique_key in st.session_state.cart
+                        
+                        checked = st.checkbox(
+                            f"{r['pick']} | {r['odds']} ({r['prob']:.0%})",
+                            value=is_checked,
+                            key=unique_key
+                        )
+                        
+                        # 同步勾選狀況至全域購物車
+                        if checked and not is_checked:
+                            st.session_state.cart[unique_key] = r
+                        elif not checked and is_checked:
+                            st.session_state.cart.pop(unique_key, None)
+
     with right:
-        st.subheader("🧾 投注單試算")
-        if sel:
-            betslip(sel, mode, budget)
+        st.subheader("🧾 跨聯賽自選投注單")
+        
+        cart_items = list(st.session_state.cart.values())
+        if cart_items:
+            betslip(cart_items, mode, budget)
         else:
-            st.info("👈 勾選選項開始試算")
+            st.info("👈 在左側勾選賽事，切換不同聯賽也可以自由混合挑選！")
 
 
 def ai_list(df):
