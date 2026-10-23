@@ -30,7 +30,7 @@ LEAGUES = {
               "意甲": "soccer_italy_serie_a", "德甲": "soccer_germany_bundesliga",
               "歐冠": "soccer_uefa_champs_league"},
     "🏀 籃球": {"NBA": "basketball_nba", "歐洲聯賽": "basketball_euroleague"},
-    "⚾ 棒球": {"MLB": "baseball_mlb", "🇹🇼 中華職棒 CPBL": "baseball_cpbl"},
+    "⚾ 棒球": {"MLB": "baseball_mlb", "🇹🇼 中華職棒 CPBL": "custom_cpbl"},
     "🏒 冰球": {"NHL": "icehockey_nhl"},
     "🏈 美式足球": {"NFL": "americanfootball_nfl"},
 }
@@ -54,8 +54,30 @@ def fair(prices):
     return [x / s for x in inv]
 
 
+# -------------------------------------------------------------------
+# 中華職棒 (CPBL) 本地預設開盤資料庫 (防止 API 422 錯誤)
+# -------------------------------------------------------------------
+def load_cpbl_mock():
+    rows = [
+        ("cpbl1|不讓分|中信兄弟 勝 (主)", "cpbl1", "中信兄弟 (主) vs 統一7-ELEVEn獅 (客)", "18:35", "不讓分", "中信兄弟 勝 (主)", 1.75, 0.54, 0.05, "中信兄弟", "統一7-ELEVEn獅", "中信兄弟 獨贏", "中信兄弟", "統一7-ELEVEn獅"),
+        ("cpbl1|不讓分|統一7-ELEVEn獅 勝 (客)", "cpbl1", "中信兄弟 (主) vs 統一7-ELEVEn獅 (客)", "18:35", "不讓分", "統一7-ELEVEn獅 勝 (客)", 1.95, 0.46, -0.10, "中信兄弟", "統一7-ELEVEn獅", "統一獅 獨贏", "中信兄弟", "統一7-ELEVEn獅"),
+        ("cpbl1|讓分盤|中信兄弟 讓分 (-1.5)", "cpbl1", "中信兄弟 (主) vs 統一7-ELEVEn獅 (客)", "18:35", "讓分盤", "中信兄弟 讓分 (-1.5)", 2.15, 0.43, -0.07, "中信兄弟", "統一7-ELEVEn獅", "中信兄弟 讓 -1.5", "中信兄弟", "統一7-ELEVEn獅"),
+        ("cpbl1|讓分盤|統一7-ELEVEn獅 受讓 (+1.5)", "cpbl1", "中信兄弟 (主) vs 統一7-ELEVEn獅 (客)", "18:35", "讓分盤", "統一7-ELEVEn獅 受讓 (+1.5)", 1.65, 0.57, 0.04, "中信兄弟", "統一7-ELEVEn獅", "統一獅 受讓 +1.5", "中信兄弟", "統一7-ELEVEn獅"),
+        
+        ("cpbl2|不讓分|樂天桃猿 勝 (主)", "cpbl2", "樂天桃猿 (主) vs 味全龍 (客)", "18:35", "不讓分", "樂天桃猿 勝 (主)", 1.80, 0.52, 0.04, "樂天桃猿", "味全龍", "樂天桃猿 獨贏", "樂天桃猿", "味全龍"),
+        ("cpbl2|不讓分|味全龍 勝 (客)", "cpbl2", "樂天桃猿 (主) vs 味全龍 (客)", "18:35", "不讓分", "味全龍 勝 (客)", 1.90, 0.48, -0.08, "樂天桃猿", "味全龍", "味全龍 獨贏", "樂天桃猿", "味全龍"),
+        ("cpbl2|大小分|大分 8.5", "cpbl2", "樂天桃猿 (主) vs 味全龍 (客)", "18:35", "大小分", "大分 8.5", 1.75, 0.54, 0.05, "樂天桃猿", "味全龍", "大分 8.5", "樂天桃猿", "味全龍"),
+        ("cpbl2|大小分|小分 8.5", "cpbl2", "樂天桃猿 (主) vs 味全龍 (客)", "18:35", "大小分", "小分 8.5", 1.95, 0.46, -0.10, "樂天桃猿", "味全龍", "小分 8.5", "樂天桃猿", "味全龍"),
+    ]
+    cols = "id match_id match time type pick odds prob ev home away label hs aws".split()
+    return pd.DataFrame(rows, columns=cols), None
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def load(key, sport):
+    if sport == "custom_cpbl":
+        return load_cpbl_mock()
+
     try:
         r = requests.get(
             f"https://api.the-odds-api.com/v4/sports/{sport}/odds/",
@@ -77,7 +99,6 @@ def load(key, sport):
         t = dt.datetime.fromisoformat(m["commence_time"].replace("Z", "+00:00"))
         t = t.astimezone(TZ).strftime("%m-%d %H:%M")
 
-        # 多家莊家:平均去水機率 + 最佳賠率
         agg = defaultdict(lambda: [[], 0.0])
         for bk in m["bookmakers"]:
             for mk in bk["markets"]:
@@ -104,7 +125,7 @@ def load(key, sport):
                 else:
                     add("不讓分", f"{cn(name)} 勝 ({'主' if name == home else '客'})",
                         o, p, f"{sn(name)} 獨贏")
-                    if draw:  # 雙重機會(估算賠率,以莊家實際為準)
+                    if draw:
                         add("雙重機會", f"🛡️ {cn(name)} 勝或和", 0.95 / (p + draw),
                             p + draw, f"{sn(name)} 不敗")
             elif mk == "spreads":
@@ -119,7 +140,7 @@ def load(key, sport):
     return pd.DataFrame(rows, columns=cols), None
 
 
-LOG = "data/picks.csv"  # 由 collector.py 每日經 GitHub Actions 更新
+LOG = "data/picks.csv"
 SNAPS = "data/snapshots.csv"
 LEAGUE_BY_SPORT = {v: k for cat in LEAGUES.values() for k, v in cat.items()}
 
@@ -156,7 +177,6 @@ def track_panel():
 
 
 def pick_card(df, league):
-    """今日首選卡片:不讓分中、共識機率最高(賠率 ≥ 1.3)的選項"""
     c = df[(df.type == "不讓分") & (df.odds >= 1.3) & ~df.pick.str.contains("和局")]
     if c.empty:
         return
@@ -207,7 +227,7 @@ def betslip(items, mode, budget):
                 f"\n\n賠率 **{o:.2f}** ｜ 過關率 **{p:.1%}** ｜ 派彩 **${unit * o:,.2f}**")
 
 
-@st.fragment  # 勾選只重繪此區塊,不會重跑整頁
+@st.fragment
 def board(df, mode, budget):
     left, right = st.columns([7, 5])
     sel = []
@@ -225,11 +245,13 @@ def board(df, mode, budget):
                             sel.append(r)
     with right:
         st.subheader("🧾 投注單試算")
-        betslip(sel, mode, budget) if sel else st.info("👈 勾選選項開始試算")
+        if sel:
+            betslip(sel, mode, budget)
+        else:
+            st.info("👈 勾選選項開始試算")
 
 
 def ai_list(df):
-    """每場挑一個共識機率最高的獨贏/讓分選項,以金色標籤列出"""
     c = df[df.type.isin(["不讓分", "讓分盤"]) & (df.label != "和局")]
     if c.empty:
         return st.info("暫無資料")
@@ -250,7 +272,6 @@ def ai_list(df):
 
 
 def wilson(w, n, z=1.96):
-    """命中率的 95% Wilson 信賴區間"""
     if n == 0:
         return 0.0, 0.0
     p, d = w / n, 1 + z * z / n
@@ -260,7 +281,6 @@ def wilson(w, n, z=1.96):
 
 
 def stats_tab(df):
-    # ---------- 1. 定義問題 ----------
     st.header("1️⃣ 定義問題")
     st.markdown("""
 **研究目的**:長期追蹤並檢驗「機率與推薦」的資料品質與實際表現。
@@ -274,7 +294,6 @@ def stats_tab(df):
 **變數**:預測機率 `prob`(多家莊家去水後平均)、賠率 `odds`、`EV = prob × odds − 1`、賽果(贏/輸/退)。
 """)
 
-    # ---------- 2. 收集資料 ----------
     st.header("2️⃣ 收集資料")
     log, snaps = load_log(), load_snaps()
     done = log[log.result.isin(["贏", "輸"])].copy()
@@ -290,7 +309,6 @@ def stats_tab(df):
     st.caption("每日自動收集(排程至 2027-01-14),來源 The Odds API。"
                "目前所選聯賽的即時盤口用於 Q1。")
 
-    # ---------- 3. 整理與計算 ----------
     st.header("3️⃣ 整理與計算")
     st.subheader("Q1 各玩法描述統計(即時盤口)")
     desc = df.groupby("type").agg(
@@ -352,7 +370,6 @@ def stats_tab(df):
         cal.index = cal.index.astype(str)
         weekly = done.groupby("週").agg(**agg).round(3)
 
-    # ---------- 4. 分析與呈現 ----------
     st.header("4️⃣ 分析與呈現")
     st.subheader("EV 分布(即時盤口)")
     hist = pd.cut(df.ev, 10).value_counts().sort_index()
