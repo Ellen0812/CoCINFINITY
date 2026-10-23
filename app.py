@@ -55,7 +55,7 @@ def fair(prices):
 
 
 # -------------------------------------------------------------------
-# 中華職棒 (CPBL) 本地預設開盤資料庫 (防止 API 422 錯誤)
+# 中華職棒 (CPBL) 本地預設開盤資料庫
 # -------------------------------------------------------------------
 def load_cpbl_mock():
     rows = [
@@ -129,12 +129,14 @@ def load(key, sport):
                         add("雙重機會", f"🛡️ {cn(name)} 勝或和", 0.95 / (p + draw),
                             p + draw, f"{sn(name)} 不敗")
             elif mk == "spreads":
-                pt = pt or 0
-                add("讓分盤", f"{cn(name)} 讓分 ({pt:+g})", o, p,
-                    f"{sn(name)} {'受讓' if pt > 0 else '讓'} {pt:+g}")
+                if pt is not None:
+                    pt = pt or 0
+                    add("讓分盤", f"{cn(name)} 讓分 ({pt:+g})", o, p,
+                        f"{sn(name)} {'受讓' if pt > 0 else '讓'} {pt:+g}")
             else:
-                add("大小分", f"{'大' if name == 'Over' else '小'}分 {pt}", o, p,
-                    f"{'大' if name == 'Over' else '小'}分 {pt}")
+                if pt is not None:
+                    add("大小分", f"{'大' if name == 'Over' else '小'}分 {pt}", o, p,
+                        f"{'大' if name == 'Over' else '小'}分 {pt}")
 
     cols = "id match_id match time type pick odds prob ev home away label hs aws".split()
     return pd.DataFrame(rows, columns=cols), None
@@ -239,9 +241,10 @@ def board(df, mode, budget):
             with st.expander(f"🏆 {f.match}  ⏰ {f.time}", expanded=True):
                 for typ, tg in g.groupby("type", sort=False):
                     st.markdown(f"**【{typ}】**")
-                    for r in tg.to_dict("records"):
+                    for idx, r in enumerate(tg.to_dict("records")):
+                        unique_key = f"{r['id']}_{idx}"
                         if st.checkbox(f"{r['pick']} | {r['odds']} ({r['prob']:.0%})",
-                                       key=r["id"]):
+                                       key=unique_key):
                             sel.append(r)
     with right:
         st.subheader("🧾 投注單試算")
