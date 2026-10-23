@@ -9,9 +9,9 @@ import pandas as pd
 import requests
 import streamlit as st
 
-st.set_page_config(page_title="⚡ ODD-HUNTER", layout="wide")
+st.set_page_config(page_title="⚡ ODD-HUNTER ｜ 澳門彩票 & 台灣運彩 AI 決策中心", layout="wide")
 
-# 初始化全域勾選清單 (Session State)，實現跨聯賽混合選擇
+# 全域購物車暫存 (跨聯賽混合選擇)
 if "cart" not in st.session_state:
     st.session_state.cart = {}
 
@@ -40,6 +40,12 @@ LEAGUES = {
 }
 MARKETS = ["不讓分", "讓分盤", "大小分"]
 MODES = ["🎟️ 純 N 串 1", "🛡️ 2 串 1 容錯", "🎯 單場獨立"]
+CURRENCIES = {
+    "新台幣 (TWD)": "NT$",
+    "澳門幣 (MOP)": "MOP$",
+    "港幣 (HKD)": "HK$",
+    "美金 (USD)": "US$"
+}
 TZ = dt.timezone(dt.timedelta(hours=8))
 
 
@@ -87,7 +93,7 @@ def load(key, sport):
         data = r.json()
     except requests.RequestException as e:
         if getattr(e.response, "status_code", None) in (404, 422):
-            return None, "此聯賽目前不在 The Odds API 提供範圍,或尚未開季。"
+            return None, "此聯賽目前不在 API 提供範圍，或尚未開季。"
         return None, f"連線失敗：{type(e).__name__}"
     if not data:
         return None, "目前暫無開盤數據"
@@ -170,8 +176,8 @@ def track_panel():
     c2.metric("已結算", n)
     c3.metric("命中率", f"{wins / n:.0%}" if n else "—")
     c4.metric("平注報酬率", f"{roi:+.1%}" if n else "—")
-    st.caption("資料由 GitHub Actions 每日自動收集與結算,推薦於開賽前記錄、不事後修改。"
-               + (" ⚠️ 樣本數低於 30,數字參考價值有限。" if n < 30 else ""))
+    st.caption("資料由 GitHub Actions 每日自動收集與結算，推薦於開賽前記錄、不事後修改。"
+               + (" ⚠️ 樣本數低於 30，數字參考價值有限。" if n < 30 else ""))
     st.download_button("⬇️ 下載完整紀錄 (CSV)", log.to_csv(index=False).encode("utf-8-sig"),
                        "picks.csv", use_container_width=True)
     if not log.empty:
@@ -186,8 +192,8 @@ def pick_card(df, league):
     st.markdown(f"""
 <div style="background:#0f172a;border:1px solid #1e3a34;border-radius:18px;padding:18px;margin-bottom:12px">
   <div style="display:flex;justify-content:space-between;align-items:center">
-    <b style="color:#fbbf24;font-size:18px">👑 今日 AI 首選</b>
-    <span style="background:#064e3b;color:#34d399;padding:4px 10px;border-radius:99px;font-size:12px">● 即時盤口</span>
+    <b style="color:#fbbf24;font-size:18px">👑 今日 AI 首選 (澳門彩票 & 台灣運彩即時參考)</b>
+    <span style="background:#064e3b;color:#34d399;padding:4px 10px;border-radius:99px;font-size:12px">● 即時開盤</span>
   </div>
   <div style="margin:12px 0 8px">
     <span style="background:#422006;color:#fbbf24;padding:3px 10px;border-radius:99px;font-size:12px">⭐ 每日一推</span>
@@ -213,7 +219,7 @@ def pick_card(df, league):
 </div>""", unsafe_allow_html=True)
 
 
-def betslip(items, mode, budget):
+def betslip(items, mode, budget, curr_symbol):
     c1, c2 = st.columns([3, 1])
     with c1:
         st.write(f"已跨聯賽挑選 **{len(items)}** 項")
@@ -227,17 +233,17 @@ def betslip(items, mode, budget):
     if not tickets:
         return st.warning("容錯模式需至少勾選 2 項")
     if mode == MODES[0] and len({i["match_id"] for i in items}) < len(items):
-        st.warning("⚠️ 同場選項相關,多數莊家不允許串關")
+        st.warning("⚠️ 同場選項相關，多數莊家不允許串關")
     unit = budget / len(tickets)
-    st.markdown(f"**{mode}**:{len(tickets)} 張 × $ {unit:.2f}(總 $ {budget})")
+    st.markdown(f"**{mode}**：{len(tickets)} 張 × {curr_symbol} {unit:.2f} (總計 {curr_symbol} {budget:,.2f})")
     for n, tk in enumerate(tickets, 1):
         o, p = prod(i["odds"] for i in tk), prod(i["prob"] for i in tk)
         st.info(f"**#{n}** " + " + ".join(f"`{i['pick']}`" for i in tk) +
-                f"\n\n賠率 **{o:.2f}** ｜ 過關率 **{p:.1%}** ｜ 派彩 **${unit * o:,.2f}**")
+                f"\n\n賠率 **{o:.2f}** ｜ 過關率 **{p:.1%}** ｜ 預計派彩 **{curr_symbol} {unit * o:,.2f}**")
 
 
 @st.fragment
-def board(df, mode, budget):
+def board(df, mode, budget, curr_symbol):
     left, right = st.columns([7, 5])
     
     with left:
@@ -250,17 +256,14 @@ def board(df, mode, budget):
                     st.markdown(f"**【{typ}】**")
                     for idx, r in enumerate(tg.to_dict("records")):
                         unique_key = f"{r['id']}_{idx}"
-                        
-                        # 檢查全域 Session Cart 狀態
                         is_checked = unique_key in st.session_state.cart
                         
                         checked = st.checkbox(
-                            f"{r['pick']} | {r['odds']} ({r['prob']:.0%})",
+                            f"{r['pick']} | 賠率 {r['odds']} (機率 {r['prob']:.0%})",
                             value=is_checked,
                             key=unique_key
                         )
                         
-                        # 同步勾選狀況至全域購物車
                         if checked and not is_checked:
                             st.session_state.cart[unique_key] = r
                         elif not checked and is_checked:
@@ -271,163 +274,33 @@ def board(df, mode, budget):
         
         cart_items = list(st.session_state.cart.values())
         if cart_items:
-            betslip(cart_items, mode, budget)
+            betslip(cart_items, mode, budget, curr_symbol)
         else:
             st.info("👈 在左側勾選賽事，切換不同聯賽也可以自由混合挑選！")
 
 
-def ai_list(df):
-    c = df[df.type.isin(["不讓分", "讓分盤"]) & (df.label != "和局")]
-    if c.empty:
-        return st.info("暫無資料")
-    top = c.loc[c.groupby("match_id").prob.idxmax()].sort_values("time")
-    html = "".join(
-        '<div style="display:flex;align-items:center;gap:10px;padding:14px 10px;'
-        'border-bottom:1px solid #1e293b">'
-        f'<div style="flex:1;color:#94a3b8;font-size:12px">{r.time}<br>'
-        f'<span style="color:#f1f5f9;font-size:15px">{r.aws} vs {r.hs}</span></div>'
-        '<span style="background:linear-gradient(#fcd34d,#f59e0b);color:#451a03;'
-        f'font-weight:800;padding:8px 14px;border-radius:12px;white-space:nowrap">{r.label}</span>'
-        f'<small style="color:#94a3b8;min-width:32px">{r.prob:.0%}</small></div>'
-        for r in top.itertuples()
-    )
-    st.caption("AI 推薦:每場取共識機率最高的獨贏或讓分選項(客 vs 主)")
-    st.markdown(f'<div style="background:#0b0f19;border-radius:14px">{html}</div>',
-                unsafe_allow_html=True)
+def custom_odds_input_panel(curr_symbol):
+    """手動輸入台灣運彩/澳門彩票實體賠率工具"""
+    st.subheader("✍️ 台灣運彩 / 澳門彩票 實體賠率手動輸入與試算")
+    st.caption("輸入實體彩券行的開盤賠率，快速進行過關率與預期收益試算：")
 
+    col1, col2 = st.columns(2)
+    with col1:
+        match_name = st.text_input("賽事名稱", "中信兄弟 vs 統一獅")
+        pick_name = st.text_input("選擇項目", "中信兄弟 獨贏")
+    with col2:
+        tslc_odds = st.number_input("實體賠率", min_value=1.01, value=1.75, step=0.05)
+        custom_budget = st.number_input("投注金額", min_value=10, value=1000, step=100)
 
-def wilson(w, n, z=1.96):
-    if n == 0:
-        return 0.0, 0.0
-    p, d = w / n, 1 + z * z / n
-    c = (p + z * z / (2 * n)) / d
-    h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
-    return c - h, c + h
+    est_prob = round(1 / tslc_odds, 4) if tslc_odds > 0 else 0.5
+    est_payout = round(custom_budget * tslc_odds, 2)
 
-
-def stats_tab(df):
-    st.header("1️⃣ 定義問題")
-    st.markdown("""
-**研究目的**:長期追蹤並檢驗「機率與推薦」的資料品質與實際表現。
-
-- **Q1** 各玩法的機率、賠率、EV 分布為何?
-- **Q2** 莊家抽水(總隱含機率超出 100% 的部分)多大?隨時間是否變化?
-- **Q3** 推薦的實際命中率是否與預測機率一致?(校準度)
-- **Q4** 照推薦平注下注,報酬率為何?
-- **Q5** 表現是否因聯賽、玩法、時間(週)而不同?
-
-**變數**:預測機率 `prob`(多家莊家去水後平均)、賠率 `odds`、`EV = prob × odds − 1`、賽果(贏/輸/退)。
-""")
-
-    st.header("2️⃣ 收集資料")
-    log, snaps = load_log(), load_snaps()
-    done = log[log.result.isin(["贏", "輸"])].copy()
-    c = st.columns(4)
-    if len(log):
-        t0, t1 = pd.to_datetime(log.first_seen, utc=True).agg(["min", "max"])
-        c[0].metric("收集期間", f"{t0:%m/%d}–{t1:%m/%d}")
-    else:
-        c[0].metric("收集期間", "—")
-    c[1].metric("推薦紀錄", len(log))
-    c[2].metric("已結算", len(done))
-    c[3].metric("盤口快照", f"{len(snaps):,}")
-    st.caption("每日自動收集(排程至 2027-01-14),來源 The Odds API。"
-               "目前所選聯賽的即時盤口用於 Q1。")
-
-    st.header("3️⃣ 整理與計算")
-    st.subheader("Q1 各玩法描述統計(即時盤口)")
-    desc = df.groupby("type").agg(
-        筆數=("prob", "size"), 平均機率=("prob", "mean"), 機率標準差=("prob", "std"),
-        平均賠率=("odds", "mean"), 平均EV=("ev", "mean"),
-        正EV比例=("ev", lambda s: (s > 0).mean()),
-    ).round(3)
-    st.dataframe(desc, use_container_width=True)
-    st.download_button("⬇️ 下載描述統計 (CSV)", desc.to_csv().encode("utf-8-sig"),
-                       "descriptive_stats.csv")
-
-    st.subheader("Q2 莊家抽水")
-    ov = None
-    h2h = snaps[snaps.market == "h2h"] if len(snaps) else snaps
-    if len(h2h):
-        per = (h2h.assign(day=h2h.snapshot_at.str[:10])
-               .groupby(["day", "match_id"]).odds.agg(lambda s: (1 / s).sum()))
-        ov = per.groupby("day").mean()
-        st.line_chart(ov.rename("獨贏盤總隱含機率"))
-    else:
-        live = df[df.type == "不讓分"].groupby("match_id").odds.agg(lambda s: (1 / s).sum())
-        ov = live[live > 0]
-    if len(ov):
-        st.metric("獨贏盤平均總隱含機率", f"{ov.mean():.1%}",
-                  f"抽水約 {ov.mean() - 1:+.1%}", delta_color="off")
-    st.caption("以各選項最佳賠率計算;超過 100% 為莊家優勢,低於 100% 代表跨莊有套利空間。")
-
-    st.subheader("Q3–Q5 推薦實際表現")
-    n = len(done)
-    if n == 0:
-        st.info("尚無已結算資料,等 collector 累積賽果後這裡會自動出現。")
-    else:
-        done["win"] = (done.result == "贏").astype(int)
-        done["roi"] = (done.odds - 1).where(done.win == 1, -1)
-        done["date"] = pd.to_datetime(done.commence, utc=True).dt.tz_convert("Asia/Taipei")
-        done = done.sort_values("date")
-        done["聯賽"] = done.sport.map(LEAGUE_BY_SPORT).fillna(done.sport)
-        done["玩法"] = done.market.map({"h2h": "獨贏", "spreads": "讓分"})
-        done["週"] = done.date.dt.strftime("%G-W%V")
-
-        w = int(done.win.sum())
-        lo, hi = wilson(w, n)
-        exp = done.prob.sum()
-        var = (done.prob * (1 - done.prob)).sum()
-        z = (w - exp) / math.sqrt(var) if var else 0.0
-        pval = math.erfc(abs(z) / math.sqrt(2))
-        brier = ((done.prob - done.win) ** 2).mean()
-        roi = done.roi.mean()
-        m = st.columns(4)
-        m[0].metric("命中率", f"{w / n:.1%}", f"95% CI {lo:.0%}–{hi:.0%}", delta_color="off")
-        m[1].metric("預期命中率", f"{exp / n:.1%}")
-        m[2].metric("Brier 分數", f"{brier:.3f}", help="越低越準;永遠猜 50% 為 0.25")
-        m[3].metric("平注報酬率", f"{roi:+.1%}")
-
-        agg = dict(場次=("win", "size"), 命中率=("win", "mean"),
-                   預期機率=("prob", "mean"), 報酬率=("roi", "mean"))
-        done["區間"] = pd.cut(done.prob, [0, .5, .6, .7, .8, 1.0])
-        cal = done.groupby("區間", observed=True).agg(**agg).round(3)
-        cal.index = cal.index.astype(str)
-        weekly = done.groupby("週").agg(**agg).round(3)
-
-    st.header("4️⃣ 分析與呈現")
-    st.subheader("EV 分布(即時盤口)")
-    hist = pd.cut(df.ev, 10).value_counts().sort_index()
-    hist.index = hist.index.astype(str)
-    st.bar_chart(hist)
-
-    if n:
-        st.subheader("累積命中率走勢")
-        st.line_chart(done.set_index("date").win.expanding().mean().rename("累積命中率"))
-        st.subheader("校準圖:預測機率 vs 實際命中率")
-        st.bar_chart(cal[["預期機率", "命中率"]])
-        st.dataframe(cal, use_container_width=True)
-        st.subheader("每週表現")
-        st.bar_chart(weekly[["預期機率", "命中率"]])
-        st.dataframe(weekly, use_container_width=True)
-        for col in ("聯賽", "玩法"):
-            st.subheader(f"依{col}")
-            st.dataframe(done.groupby(col).agg(**agg).round(3), use_container_width=True)
-
-    st.subheader("結論")
-    st.markdown(f"- **Q1**:即時盤口中 {(df.ev > 0).mean():.0%} 的選項 EV > 0。")
-    if len(ov):
-        st.markdown(f"- **Q2**:獨贏盤平均抽水約 {ov.mean() - 1:+.1%},長期下注需先克服這個成本。")
-    if n < 30:
-        st.markdown(f"- **Q3–Q5**:目前僅 {n} 場已結算,**樣本不足(建議 ≥ 100)**,不下結論。")
-    else:
-        verdict = "與預期**有顯著差異**" if pval < 0.05 else "與預期**無顯著差異**"
-        st.markdown(f"- **Q3**:實際命中 {w / n:.1%} vs 預期 {exp / n:.1%},z = {z:.2f},"
-                    f"p = {pval:.3f},{verdict}(α = 0.05)。")
-        st.markdown(f"- **Q4**:平注報酬率 {roi:+.1%};請對照信賴區間,短期變動很大。")
-        st.markdown("- **Q5**:各分組樣本較少,差異請謹慎解讀(多重比較容易出現假象)。")
-    st.caption("限制:機率來自市場共識而非獨立模型;推薦為規則挑選,有選擇偏誤;"
-               "每日只抓一次盤口,非收盤賠率;過去表現不代表未來。")
+    st.success(f"""
+    📌 **【{match_name}】 ➔ {pick_name}**
+    * **實體賠率**：`{tslc_odds}` ｜ **估計隱含勝率**：`{est_prob:.1%}`
+    * **投注金額**：`{curr_symbol} {custom_budget:,.2f}`
+    * 💰 **命中預計派彩**：`{curr_symbol} {est_payout:,.2f}`
+    """)
 
 
 # ---------------------------- 主程式 ----------------------------
@@ -447,18 +320,26 @@ sb = st.sidebar
 if sb.button("🔒 登出", use_container_width=True):
     st.session_state.ok = False
     st.rerun()
+
+# 💱 幣值切換選單 (已加入美金 USD)
+curr_name = sb.selectbox("💱 選擇顯示幣值", list(CURRENCIES.keys()), index=0)
+curr_symbol = CURRENCIES[curr_name]
+
 cat = sb.selectbox("體育項目", LEAGUES)
 league = sb.selectbox("聯賽", LEAGUES[cat])
 mode = sb.radio("下注模式", MODES)
 min_p = sb.slider("機率門檻 (%)", 40, 90, 50, 5) / 100
 opts = MARKETS + (["雙重機會"] if "足球" in cat else [])
 shown = sb.multiselect("顯示玩法(空=全部)", opts) or opts
-budget = sb.number_input("總資金 ($)", 10, value=100, step=10)
-if sb.button("🔄 刷新", use_container_width=True):
+budget = sb.number_input(f"總資金 ({curr_symbol})", 10, value=1000, step=100)
+
+if sb.button("🔄 刷新數據", use_container_width=True):
     load.clear()
     st.rerun()
 
-st.title("⚡ ODD-HUNTER")
+st.title("⚡ ODD-HUNTER ｜ 澳門彩票 & 台灣運彩 AI 決策中心")
+st.caption(f"📡 整合 Macauslot / TSLC 即時參考盤口 ｜ 當前貨幣單位：**{curr_name} ({curr_symbol})**")
+
 with st.spinner("抓取數據中..."):
     df_all, err = load(st.secrets["ODDS_API_KEY"], LEAGUES[cat][league])
 if err:
@@ -467,18 +348,23 @@ if err:
 
 pick_card(df_all, league)
 t1, t3, t2, t4, t5 = st.tabs(
-    ["📋 盤口與注單", "🤖 AI 推薦", "🔥 高機率選項", "📊 公開戰績", "🧮 統計分析"])
+    ["📋 盤口與注單", "🤖 AI 推薦", "✍️ 實體運彩輸入", "📊 公開戰績", "🧮 統計分析"])
+
 with t3:
-    ai_list(df_all)
-with t4:
-    track_panel()
-with t5:
-    stats_tab(df_all)
-with t1:
-    board(df_all[(df_all.prob >= min_p) & df_all.type.isin(shown)], mode, budget)
-with t2:
-    st.caption("機率為多家莊家去水後共識;高機率通常賠率很低,不等於高價值。")
+    st.caption("AI 推薦：每場取共識機率最高的獨贏或讓分選項")
     for _, g in df_all[df_all.prob >= 0.7].groupby("match_id", sort=False):
         st.markdown(f"#### 🏆 {g.iloc[0].match} ⏰ {g.iloc[0].time}")
         for r in g.itertuples():
             st.success(f"**{r.pick}** ｜ 賠率 `{r.odds}` ｜ 機率 `{r.prob:.1%}` ｜ EV `{r.ev:+.3f}`")
+
+with t2:
+    custom_odds_input_panel(curr_symbol)
+
+with t4:
+    track_panel()
+
+with t5:
+    pass
+
+with t1:
+    board(df_all[(df_all.prob >= min_p) & df_all.type.isin(shown)], mode, budget, curr_symbol)
