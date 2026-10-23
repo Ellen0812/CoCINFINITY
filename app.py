@@ -9,7 +9,7 @@ import pandas as pd
 import requests
 import streamlit as st
 
-st.set_page_config(page_title="⚡ ODD-HUNTER ｜ 澳門彩票 & 台灣運彩 AI 決策中心", layout="wide")
+st.set_page_config(page_title="⚡ ODD-HUNTER ｜ 複式組合 AI 體育決策中心", layout="wide")
 
 # 全域購物車暫存 (跨聯賽混合選擇)
 if "cart" not in st.session_state:
@@ -39,7 +39,16 @@ LEAGUES = {
     "🏈 美式足球": {"NFL": "americanfootball_nfl"},
 }
 MARKETS = ["不讓分", "讓分盤", "大小分"]
-MODES = ["🎟️ 純 N 串 1", "🛡️ 2 串 1 容錯", "🎯 單場獨立"]
+
+MODES = [
+    "🎟️ 純 N 串 1",
+    "🛡️ 2 串 1 容錯",
+    "🎯 單場獨立",
+    "🗻 富士組合 (3場7注 Patent)",
+    "🗽 洋基組合 (4場11注 Yankee)",
+    "⚡ 4 串 6 (4場6組2串1)"
+]
+
 CURRENCIES = {
     "新台幣 (TWD)": "NT$",
     "澳門幣 (MOP)": "MOP$",
@@ -222,24 +231,84 @@ def pick_card(df, league):
 def betslip(items, mode, budget, curr_symbol):
     c1, c2 = st.columns([3, 1])
     with c1:
-        st.write(f"已跨聯賽挑選 **{len(items)}** 項")
+        st.write(f"已選擇 **{len(items)}** 項賽事")
     with c2:
         if st.button("🗑️ 清空注單", key="clear_cart_btn"):
             st.session_state.cart.clear()
             st.rerun()
 
-    tickets = [[tuple(items)], list(itertools.combinations(items, 2)),
-               [(i,) for i in items]][MODES.index(mode)]
+    tickets = []
+
+    # 1. 基礎模式拆單
+    if mode == "🎟️ 純 N 串 1":
+        tickets = [tuple(items)]
+    elif mode == "🛡️ 2 串 1 容錯":
+        tickets = list(itertools.combinations(items, 2))
+    elif mode == "🎯 單場獨立":
+        tickets = [(i,) for i in items]
+
+    # 2. 🗻 富士組合 Patent (3場7注: 3個單場 + 3個2串1 + 1個3串1)
+    elif mode == "🗻 富士組合 (3場7注 Patent)":
+        if len(items) != 3:
+            return st.warning("⚠️ 富士組合 (Patent) **專用 3 場賽事**！請調整勾選數量至 3 場。")
+        combos_1 = [(i,) for i in items]
+        combos_2 = list(itertools.combinations(items, 2))
+        combos_3 = [tuple(items)]
+        tickets = combos_1 + combos_2 + combos_3
+
+    # 3. 🗽 洋基組合 Yankee (4場11注: 6個2串1 + 4個3串1 + 1個4串1)
+    elif mode == "🗽 洋基組合 (4場11注 Yankee)":
+        if len(items) != 4:
+            return st.warning("⚠️ 洋基組合 (Yankee) **專用 4 場賽事**！請調整勾選數量至 4 場。")
+        combos_2 = list(itertools.combinations(items, 2))
+        combos_3 = list(itertools.combinations(items, 3))
+        combos_4 = [tuple(items)]
+        tickets = combos_2 + combos_3 + combos_4
+
+    # 4. ⚡ 4 串 6 (4場6組2串1)
+    elif mode == "⚡ 4 串 6 (4場6組2串1)":
+        if len(items) != 4:
+            return st.warning("⚠️ 4 串 6 **專用 4 場賽事**！請調整勾選數量至 4 場。")
+        tickets = list(itertools.combinations(items, 2))
+
     if not tickets:
-        return st.warning("容錯模式需至少勾選 2 項")
-    if mode == MODES[0] and len({i["match_id"] for i in items}) < len(items):
-        st.warning("⚠️ 同場選項相關，多數莊家不允許串關")
+        return st.warning("請在左側勾選適當場數！")
+
     unit = budget / len(tickets)
-    st.markdown(f"**{mode}**：{len(tickets)} 張 × {curr_symbol} {unit:.2f} (總計 {curr_symbol} {budget:,.2f})")
+    st.markdown(f"**{mode}**：共 **{len(tickets)} 注** ｜ 每注 {curr_symbol} {unit:.2f} (總預算 {curr_symbol} {budget:,.2f})")
+
+    total_payout = 0
+    all_win_prob = prod(i["prob"] for i in items)
+
     for n, tk in enumerate(tickets, 1):
-        o, p = prod(i["odds"] for i in tk), prod(i["prob"] for i in tk)
+        o = prod(i["odds"] for i in tk)
+        p = prod(i["prob"] for i in tk)
+        payout = unit * o
+        total_payout += payout
         st.info(f"**#{n}** " + " + ".join(f"`{i['pick']}`" for i in tk) +
-                f"\n\n賠率 **{o:.2f}** ｜ 過關率 **{p:.1%}** ｜ 預計派彩 **{curr_symbol} {unit * o:,.2f}**")
+                f"\n\n賠率 **{o:.2f}** ｜ 過關率 **{p:.1%}** ｜ 命中派彩 **{curr_symbol} {payout:,.2f}**")
+
+    # 4串6 vs Yankee 對比展示
+    if len(items) == 4 and ("Yankee" in mode or "4 串 6" in mode):
+        st.markdown("---")
+        st.subheader("📊 4串6 vs Yankee（洋基組合）對比分析")
+        
+        y_tickets = list(itertools.combinations(items, 2)) + list(itertools.combinations(items, 3)) + [tuple(items)]
+        c6_tickets = list(itertools.combinations(items, 2))
+        
+        y_unit = budget / 11
+        c6_unit = budget / 6
+        
+        y_max_payout = sum(y_unit * prod(i["odds"] for i in tk) for tk in y_tickets)
+        c6_max_payout = sum(c6_unit * prod(i["odds"] for i in tk) for tk in c6_tickets)
+        
+        st.markdown(f"""
+        * **中 2 場情況**：4串6 與 Yankee 都**至少命中 1 注 2串1**，皆能開始獲得派彩（最低過關門檻一致）。
+        * **中 3 場情況**：4串6 獲得 **3 注 2串1**；Yankee 則可獲得 **3 注 2串1 + 1 注 3串1**，Yankee 派彩開始超越 4串6。
+        * **全中 4 場極致爆發力**：
+          * **4 串 6 (6注)**：最高派彩 **{curr_symbol} {c6_max_payout:,.2f}**
+          * **Yankee (11注)**：最高派彩 **{curr_symbol} {y_max_payout:,.2f}** (包含 4串1 高倍率疊加)
+        """)
 
 
 @st.fragment
@@ -270,17 +339,16 @@ def board(df, mode, budget, curr_symbol):
                             st.session_state.cart.pop(unique_key, None)
 
     with right:
-        st.subheader("🧾 跨聯賽自選投注單")
+        st.subheader("🧾 複式組合自選投注單")
         
         cart_items = list(st.session_state.cart.values())
         if cart_items:
             betslip(cart_items, mode, budget, curr_symbol)
         else:
-            st.info("👈 在左側勾選賽事，切換不同聯賽也可以自由混合挑選！")
+            st.info("👈 請在左側勾選賽事，即可進行富士組合、Yankee 洋基組合與 4 串 6 的試算！")
 
 
 def custom_odds_input_panel(curr_symbol):
-    """手動輸入台灣運彩/澳門彩票實體賠率工具"""
     st.subheader("✍️ 台灣運彩 / 澳門彩票 實體賠率手動輸入與試算")
     st.caption("輸入實體彩券行的開盤賠率，快速進行過關率與預期收益試算：")
 
@@ -321,7 +389,6 @@ if sb.button("🔒 登出", use_container_width=True):
     st.session_state.ok = False
     st.rerun()
 
-# 💱 幣值切換選單 (已加入美金 USD)
 curr_name = sb.selectbox("💱 選擇顯示幣值", list(CURRENCIES.keys()), index=0)
 curr_symbol = CURRENCIES[curr_name]
 
